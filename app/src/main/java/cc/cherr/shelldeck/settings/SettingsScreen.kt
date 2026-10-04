@@ -4,6 +4,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -19,18 +20,25 @@ import cc.cherr.shelldeck.keyboard.*
 import org.json.JSONArray
 
 @Composable
-fun SettingsScreen(model: ShellDeckModel, onBack: () -> Unit) {
+fun SettingsScreen(model: ShellDeckModel, onIdentities: () -> Unit = {}, onEditorVisibilityChanged: (Boolean) -> Unit = {}, onBack: () -> Unit) {
     var editing by rememberSaveable { mutableStateOf(false) }
+    DisposableEffect(editing) {
+        onEditorVisibilityChanged(editing)
+        onDispose { onEditorVisibilityChanged(false) }
+    }
     var rename by remember { mutableStateOf<FontEntry?>(null) }
     var deleting by remember { mutableStateOf<FontEntry?>(null) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) model.importFont(uri) }
-    if (editing) { KeyboardEditor(model.settings.keyboard, { editing = false }) {
+    if (editing) { KeyboardEditor(model.settings.keyboard, model.settings.keyboardSizing, { editing = false }) {
         model.updateSettings(model.settings.copy(keyboard = it)); editing = false
     }; return }
     BackHandler(onBack = onBack)
     val settings = model.settings
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row { TextButton(onClick = onBack) { Text("返回") }; Text("设置", style = MaterialTheme.typography.headlineMedium) }
+        ListItem(headlineContent = { Text("SSH 身份与密钥") },
+            supportingContent = { Text("导入和管理私钥，供服务器共用") }, modifier = Modifier.clickable(onClick = onIdentities))
+        HorizontalDivider()
         Text("外观", style = MaterialTheme.typography.titleLarge)
         Choices(ThemeMode.entries, settings.theme, { when(it) { ThemeMode.SYSTEM -> "跟随系统"; ThemeMode.LIGHT -> "明亮"; ThemeMode.DARK -> "深色" } }) {
             model.updateSettings(settings.copy(theme = it))
@@ -71,6 +79,13 @@ fun SettingsScreen(model: ShellDeckModel, onBack: () -> Unit) {
         Text("快捷键", style = MaterialTheme.typography.titleLarge)
         Text("两行整体左右滑动。修饰键点按用于下一次输入；按住持续生效；长按后松手锁定，再点解除。")
         TextButton(onClick = { editing = true }) { Text("编辑快捷键布局") }
+        KeyboardSizeSettings(settings.keyboard, settings.keyboardSizing) {
+            model.updateSettings(model.settings.copy(keyboardSizing = it))
+        }
+        HorizontalDivider()
+        BackgroundSettings(settings.backgroundMode, model.backgroundError) {
+            model.updateSettings(model.settings.copy(backgroundMode = it))
+        }
     }
     rename?.let { font ->
         var label by remember(font.id) { mutableStateOf(font.label) }
@@ -93,7 +108,7 @@ private fun <T> Choices(options: List<T>, selected: T, label: (T) -> String, cho
 }
 
 @Composable
-private fun KeyboardEditor(initial: KeyboardProfile, cancel: () -> Unit, save: (KeyboardProfile) -> Unit) {
+private fun KeyboardEditor(initial: KeyboardProfile, sizing: KeyboardSizing, cancel: () -> Unit, save: (KeyboardProfile) -> Unit) {
     var json by rememberSaveable { mutableStateOf(SettingsStore.encodeKeyboard(initial).toString()) }
     val draft = remember(json) { SettingsStore.decodeKeyboard(JSONArray(json)) }
     var selected by rememberSaveable { mutableStateOf<Pair<Int, Int>?>(null) }
@@ -104,30 +119,23 @@ private fun KeyboardEditor(initial: KeyboardProfile, cancel: () -> Unit, save: (
     Column(Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row { TextButton(onClick = { back() }) { Text("返回") }; TextButton(onClick = { save(draft) }) { Text("保存布局") } }
         Text("编辑快捷键", style = MaterialTheme.typography.headlineSmall)
-        Text("左右滑动查看全部按键，点击位置进行编辑。保存后才会应用。")
-        Column(Modifier.horizontalScroll(rememberScrollState())) {
-            draft.rows.forEachIndexed { r, row -> Row {
-                row.forEachIndexed { c, slot -> OutlinedButton(onClick = { selected = r to c }, modifier = Modifier.width((64 * slot.width).dp).height(48.dp), contentPadding = PaddingValues(2.dp)) { Text(slot.label, maxLines = 1) } }
-                TextButton(enabled = row.size < 32, onClick = {
-                    replace(draft.rows.mapIndexed { i, keys -> if (i == r) keys + KeySlot("新键", KeyAction.Character(" ")) else keys }); selected = r to row.size
-                }) { Text("＋") }
-            } }
-        }
+        Text("点击修改内容，长按拖动排序或移到另一行；拖到左右边缘可自动滚动。保存后才会应用。")
+        KeyboardLayoutEditor(draft, sizing,
+            edit = { selected = it.row to it.index },
+            add = { r ->
+                val row = draft.rows[r]
+                replace(draft.rows.mapIndexed { i, keys -> if (i == r) keys + KeySlot("新键", KeyAction.Character(" ")) else keys })
+                selected = r to row.size
+            },
+            move = { from, to -> replace(draft.moveKey(from, to).rows) })
         TextButton(onClick = { json = SettingsStore.encodeKeyboard(KeyboardProfile.default()).toString() }) { Text("恢复默认布局（保存后生效）") }
     }
     selected?.let { (r, c) ->
         val slot = draft.rows[r][c]
-        KeyEditor(slot, c > 0, c < draft.rows[r].lastIndex, draft.rows[r].size > 1, draft.rows[r].size > 1 && draft.rows[1-r].size < 32, { selected = null }, { updated ->
+        KeyEditor(slot, draft.rows[r].size > 1, { selected = null }, { updated ->
             replace(draft.rows.mapIndexed { i, row -> if (i == r) row.mapIndexed { j, item -> if (j == c) updated else item } else row }); selected = null
-        }, { direction, updated ->
-            val rows = draft.rows.map { it.toMutableList() }
-            rows[r][c] = updated
-            when (direction) {
-                -1, 1 -> { val next = c + direction; if (next in rows[r].indices) java.util.Collections.swap(rows[r], c, next) }
-                2 -> if (rows[r].size > 1 && rows[1-r].size < 32) rows[1-r].add(rows[r].removeAt(c))
-                0 -> if (rows[r].size > 1) rows[r].removeAt(c)
-            }
-            replace(rows); selected = null
+        }, {
+            replace(draft.rows.mapIndexed { i, row -> if (i == r) row.filterIndexed { j, _ -> j != c } else row }); selected = null
         })
     }
     if (discard) AlertDialog(onDismissRequest = { discard = false }, title = { Text("放弃未保存的布局？") },
@@ -135,7 +143,7 @@ private fun KeyboardEditor(initial: KeyboardProfile, cancel: () -> Unit, save: (
 }
 
 @Composable
-private fun KeyEditor(initial: KeySlot, canLeft: Boolean, canRight: Boolean, canDelete: Boolean, canChangeRow: Boolean, cancel: () -> Unit, save: (KeySlot) -> Unit, move: (Int, KeySlot) -> Unit) {
+private fun KeyEditor(initial: KeySlot, canDelete: Boolean, cancel: () -> Unit, save: (KeySlot) -> Unit, delete: () -> Unit) {
     val types = listOf("字符", "特殊键", "修饰键", "转义序列", "宏", "键盘开关")
     var label by rememberSaveable { mutableStateOf(initial.label) }
     var width by rememberSaveable { mutableIntStateOf(initial.width) }
@@ -179,8 +187,7 @@ private fun KeyEditor(initial: KeySlot, canLeft: Boolean, canRight: Boolean, can
                 }
             }
             Choices(listOf(1,2,3), width, { "${it}倍宽" }) { width = it }
-            Row { TextButton(enabled = valid && canLeft, onClick = { move(-1, editedSlot()) }) { Text("左移") }; TextButton(enabled = valid && canRight, onClick = { move(1, editedSlot()) }) { Text("右移") } }
-            Row { TextButton(enabled = valid && canChangeRow, onClick = { move(2, editedSlot()) }) { Text("移到另一行") }; TextButton(enabled = valid && canDelete, onClick = { move(0, editedSlot()) }) { Text("删除") } }
+            TextButton(enabled = canDelete, onClick = delete) { Text("删除按键") }
         }
     }, confirmButton = { TextButton(enabled = valid, onClick = {
         save(editedSlot())

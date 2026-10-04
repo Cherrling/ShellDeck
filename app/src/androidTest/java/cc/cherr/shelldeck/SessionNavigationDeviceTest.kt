@@ -31,11 +31,21 @@ class SessionNavigationDeviceTest {
             ui.runOnUiThread { model.saveHost(null, "Navigation test host", "127.0.0.1", args.getString("sshPort")!!, args.getString("sshUser")!!, identityId) }
             ui.waitUntil(10000) { !model.busy && model.hosts.any { it.label == "Navigation test host" } }
             val host = model.hosts.first { it.label == "Navigation test host" }; hostId = host.id
-            ui.runOnUiThread { model.connect(host, "") }
+            ui.onNodeWithContentDescription("Navigation test host 的更多操作").performClick()
+            ui.onNodeWithText("编辑服务器").assertIsDisplayed()
+            InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+            ui.runOnIdle { assertTrue(model.sessionManager.sessions.isEmpty()) }
+            ui.onNodeWithTag("host-${host.id}").performClick()
             ui.waitUntil(10000) { model.sessionManager.selected?.challenge != null }
             ui.onNodeWithText("仅信任本次").performClick()
             ui.waitUntil(10000) { model.sessionManager.selected?.terminal?.session?.isReady == true }
             val connection = model.sessionManager.selected!!
+            ui.onNodeWithTag("main-navigation").assertDoesNotExist()
+            ui.runOnIdle { model.updateSettings(model.settings.copy(theme = cc.cherr.shelldeck.settings.ThemeMode.LIGHT, palette = cc.cherr.shelldeck.settings.TerminalPalette.DARK)) }
+            ui.runOnIdle { assertFalse(androidx.core.view.WindowCompat.getInsetsController(ui.activity.window, ui.activity.window.decorView).isAppearanceLightStatusBars) }
+            ui.runOnIdle { model.updateSettings(model.settings.copy(palette = cc.cherr.shelldeck.settings.TerminalPalette.LIGHT)) }
+            ui.runOnIdle { assertTrue(androidx.core.view.WindowCompat.getInsetsController(ui.activity.window, ui.activity.window.decorView).isAppearanceLightStatusBars) }
+            ui.runOnIdle { model.updateSettings(model.settings.copy(palette = cc.cherr.shelldeck.settings.TerminalPalette.DARK)) }
             ui.onNodeWithText("键盘", substring = false).performClick()
             ui.waitUntil(10000) { ViewCompat.getRootWindowInsets(ui.activity.window.decorView)?.isVisible(WindowInsetsCompat.Type.ime()) == true }
             ui.runOnIdle { model.updateSettings(model.settings.copy(fontSize = 14)) }
@@ -60,21 +70,22 @@ class SessionNavigationDeviceTest {
             InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
             ui.waitUntil(5000) { model.sessionManager.selected == null }
             ui.onNodeWithText("活动会话").assertIsDisplayed()
+            ui.onNodeWithTag("page-SESSIONS").assertIsSelected()
+            ui.runOnIdle { assertTrue(androidx.core.view.WindowCompat.getInsetsController(ui.activity.window, ui.activity.window.decorView).isAppearanceLightStatusBars) }
             ui.runOnIdle { assertNull(ui.activity.onTerminalFontSizeChange) }
             ui.activityRule.scenario.recreate()
             ui.runOnIdle { assertTrue(connection.terminal.session.isReady) }
-            ui.onNodeWithText("打开", substring = false).performClick()
-            ui.onNodeWithText("Navigation test host", substring = false).assertDoesNotExist()
-            ui.onNodeWithContentDescription("终端菜单").assertIsDisplayed().performClick()
-            ui.onNodeWithText("Navigation test host", substring = false).assertIsDisplayed()
             ui.onNodeWithText("设置", substring = false).performClick()
             ui.runOnIdle { assertNull(ui.activity.onTerminalFontSizeChange) }
-            ui.onNodeWithText("字号：14 sp").assertIsDisplayed()
-            ui.onNodeWithText("返回", substring = false).performClick()
+            ui.onNodeWithText("字号：14 sp").performScrollTo().assertIsDisplayed()
+            ui.onNodeWithText("返回", substring = false).performScrollTo().performClick()
+            ui.onNodeWithTag("page-SESSIONS").performClick()
+            ui.onNodeWithText("打开", substring = false).performClick()
+            ui.onNodeWithText("Navigation test host", substring = false).assertDoesNotExist()
+            ui.onNodeWithContentDescription("终端菜单").assertDoesNotExist()
+            ui.onNodeWithContentDescription("切换会话").assertDoesNotExist()
             ui.runOnIdle { assertSame(connection, model.sessionManager.selected); assertTrue(connection.terminal.session.isReady) }
-            ui.onNodeWithContentDescription("切换会话").performClick()
-            ui.onNodeWithText("取消", substring = false).performClick()
-            ui.onNodeWithContentDescription("终端菜单").performClick()
+            ui.runOnUiThread { model.sessionManager.home() }
             ui.onNodeWithText("关闭连接", substring = false).performClick()
             ui.onNodeWithText("确认", substring = false).performClick()
             ui.runOnIdle { assertTrue(model.sessionManager.sessions.isEmpty()); assertTrue(connection.ended) }

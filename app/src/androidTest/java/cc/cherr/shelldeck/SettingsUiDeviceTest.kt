@@ -10,6 +10,22 @@ import org.junit.Test
 
 class SettingsUiDeviceTest {
     @get:Rule val ui = createAndroidComposeRule<MainActivity>()
+    @Test fun keySizePresetsAndSliderPersistAcrossRecreation() {
+        lateinit var model: ShellDeckModel
+        ui.runOnUiThread { model = ViewModelProvider(ui.activity)[ShellDeckModel::class.java] }
+        val original = model.settings
+        try {
+            ui.onNodeWithText("设置").performClick()
+            ui.onNodeWithText("宽松", substring = false).performScrollTo().performClick()
+            ui.runOnIdle { assertEquals(cc.cherr.shelldeck.keyboard.KeyboardSizing(48, 64, 14), model.settings.keyboardSizing) }
+            ui.onNodeWithTag("key-height-slider").performScrollTo().performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.SetProgress) { it(32f) }
+            ui.runOnIdle { assertEquals(32, model.settings.keyboardSizing.rowHeight) }
+            ui.activityRule.scenario.recreate()
+            ui.onNodeWithText("行高：32 dp").performScrollTo().assertIsDisplayed()
+            ui.onNodeWithText("紧凑", substring = false).performScrollTo().performClick()
+            ui.runOnIdle { assertEquals(cc.cherr.shelldeck.keyboard.KeyboardSizing(), model.settings.keyboardSizing) }
+        } finally { ui.runOnUiThread { model.updateSettings(original) } }
+    }
     @Test fun editSaveRecreateAndCancelKeepExpectedSettings() {
         lateinit var model: ShellDeckModel
         ui.runOnUiThread { model = ViewModelProvider(ui.activity)[ShellDeckModel::class.java] }
@@ -24,7 +40,12 @@ class SettingsUiDeviceTest {
             ui.onNodeWithText("显示名称").performTextReplacement("退出键")
             ui.activityRule.scenario.recreate()
             ui.onNodeWithText("退出键", substring = false).assertExists()
-            ui.onNodeWithText("右移", substring = false).performScrollTo().performClick()
+            ui.onNodeWithText("确定", substring = false).performClick()
+            val from = ui.onNodeWithText("退出键", substring = false).fetchSemanticsNode().boundsInRoot.center
+            val next = ui.onNodeWithText("CTRL", substring = false).fetchSemanticsNode().boundsInRoot
+            ui.onRoot().performTouchInput {
+                down(from); advanceEventTime(650); moveTo(androidx.compose.ui.geometry.Offset(next.right - 2, next.center.y), delayMillis = 100); up()
+            }
             ui.onNodeWithText("保存布局").performClick()
             ui.runOnIdle {
                 assertEquals(ThemeMode.DARK, model.settings.theme)

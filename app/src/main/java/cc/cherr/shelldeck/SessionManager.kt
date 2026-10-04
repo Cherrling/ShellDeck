@@ -11,27 +11,28 @@ import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 
-/** Root-screen lifetime, independent of which terminal View is attached. Not a background service. */
-class SessionManager(private val application: Application, private val dao: StoreDao, private val vault: CredentialVault) {
+/** Process-owned sessions; the foreground service can retain them without an Activity. Main thread only. */
+class SessionManager(private val application: Application, private val dao: StoreDao, private val vault: CredentialVault, private val changed: () -> Unit = {}) {
     val sessions = mutableStateListOf<SessionConnection>()
     var selectedId by mutableStateOf<String?>(null); private set
     val selected get() = sessions.firstOrNull { it.id == selectedId }
+    val activeCount get() = sessions.count { !it.ended }
     fun connect(host: HostRecord, secret: String) {
         selected?.terminal?.leave()
-        val connection = SessionConnection(application, host, dao, vault, secret)
-        sessions.add(connection); selectedId = connection.id
+        val connection = SessionConnection(application, host, dao, vault, secret, changed)
+        sessions.add(connection); selectedId = connection.id; changed()
     }
     fun select(id: String) { require(sessions.any { it.id == id }); selected?.terminal?.leave(); selectedId = id }
     fun home() { selected?.terminal?.leave(); selectedId = null }
     fun close(id: String) {
         val connection = sessions.firstOrNull { it.id == id } ?: return
         if (selectedId == id) home()
-        connection.close(); sessions.remove(connection)
+        connection.close(); sessions.remove(connection); changed()
     }
     fun closeAll() { sessions.toList().forEach { close(it.id) } }
 }
 
-class SessionConnection(application: Application, val host: HostRecord, dao: StoreDao, vault: CredentialVault, secret: String) {
+class SessionConnection(application: Application, val host: HostRecord, dao: StoreDao, vault: CredentialVault, secret: String, private val changed: () -> Unit = {}) {
     val id: String = UUID.randomUUID().toString()
     private val main = Handler(Looper.getMainLooper())
     private var disposed = false
@@ -100,9 +101,11 @@ class SessionConnection(application: Application, val host: HostRecord, dao: Sto
         passphraseIdentity = null
     }
     private fun finish() {
+        if (ended) return
         ended = true; password.fill('\u0000')
         pendingTrust?.complete(TrustDecision.CANCEL); pendingTrust = null; challenge = null
         pendingPassphrase?.complete(null); pendingPassphrase = null; passphraseIdentity = null
+        changed()
     }
     fun close() { disposed = true; finish(); terminal.close() }
 }

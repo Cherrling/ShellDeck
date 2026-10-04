@@ -4,6 +4,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -32,11 +33,12 @@ class ExtraKeysGestureDeviceTest {
             terminal.session = TerminalSession(transport, 100, terminal)
             ui.activity.setContent { ShellDeckTheme { Column(Modifier.fillMaxSize()) {
                 AndroidView(factory = terminal::createView, modifier = Modifier.weight(1f), onRelease = terminal::releaseView)
-                ExtraKeysBar(KeyboardProfile.default(), terminal)
+                ExtraKeysBar(KeyboardProfile.default(), terminal, KeyboardSizing(28, 40, 10))
             } } }
         }
         try {
             ui.waitUntil(5000) { terminal.session.isReady }
+            ui.onNodeWithTag("extra-keys-bar").assertHeightIsEqualTo(56.dp)
             val shift = ui.onNodeWithContentDescription("SHIFT").fetchSemanticsNode().boundsInRoot.center
             val tab = ui.onNodeWithText("TAB").fetchSemanticsNode().boundsInRoot.center
             ui.onRoot().performTouchInput {

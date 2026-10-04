@@ -1,6 +1,9 @@
 package cc.cherr.shelldeck
 
 import android.app.Application
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableIntStateOf
 import android.graphics.Typeface
 import android.view.KeyEvent
 import android.view.MotionEvent
@@ -14,6 +17,8 @@ import com.termux.view.TerminalViewClient
 class TerminalController(private val app: Application, private val finished: () -> Unit) : TerminalSessionClient, TerminalViewClient {
     lateinit var session: TerminalSession
     val modifiers = ModifierState()
+    var backgroundColor by mutableIntStateOf(TerminalColors.COLOR_SCHEME.mDefaultColors[TextStyle.COLOR_INDEX_BACKGROUND]); private set
+    var foregroundColor by mutableIntStateOf(TerminalColors.COLOR_SCHEME.mDefaultColors[TextStyle.COLOR_INDEX_FOREGROUND]); private set
     private var face: Typeface = Typeface.MONOSPACE
     private var fontSize = 14
     fun appearance(typeface: Typeface, size: Int) {
@@ -54,7 +59,7 @@ class TerminalController(private val app: Application, private val finished: () 
         it.setTerminalViewClient(this)
         it.setTextSize(android.util.TypedValue.applyDimension(android.util.TypedValue.COMPLEX_UNIT_SP, fontSize.toFloat(), context.resources.displayMetrics).toInt())
         it.setTypeface(face)
-        it.setBackgroundColor(TerminalColors.COLOR_SCHEME.mDefaultColors[TextStyle.COLOR_INDEX_BACKGROUND])
+        it.setBackgroundColor(backgroundColor)
         it.isFocusableInTouchMode = true
         it.attachSession(session)
         it.requestFocus()
@@ -100,10 +105,13 @@ class TerminalController(private val app: Application, private val finished: () 
         }
     }
     override fun onBell(session: TerminalSession) = Unit
-    override fun onColorsChanged(session: TerminalSession) { terminalView?.let { view ->
-        session.emulator?.mColors?.mCurrentColors?.get(TextStyle.COLOR_INDEX_BACKGROUND)?.let(view::setBackgroundColor)
-        view.invalidate()
-    } }
+    override fun onColorsChanged(session: TerminalSession) {
+        session.emulator?.mColors?.mCurrentColors?.let { colors ->
+            backgroundColor = colors[TextStyle.COLOR_INDEX_BACKGROUND]
+            foregroundColor = colors[TextStyle.COLOR_INDEX_FOREGROUND]
+        }
+        terminalView?.let { view -> view.setBackgroundColor(backgroundColor); view.invalidate() }
+    }
     override fun onTerminalCursorStateChange(state: Boolean) = Unit
     override fun setTerminalShellPid(session: TerminalSession, pid: Int) = Unit
     override fun getTerminalCursorStyle(): Int = 0

@@ -1,5 +1,6 @@
 package cc.cherr.shelldeck
 
+import android.content.Intent
 import android.os.Bundle
 import android.net.Uri
 import android.view.KeyEvent
@@ -19,9 +20,11 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.platform.testTag
+import androidx.core.view.WindowCompat
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -38,7 +41,19 @@ import cc.cherr.shelldeck.settings.SettingsScreen
 import cc.cherr.shelldeck.keyboard.ExtraKeysBar
 import androidx.compose.runtime.saveable.rememberSaveable
 
+private enum class MainPage(val label: String, val icon: Int) {
+    HOSTS("服务器", R.drawable.ic_hosts), SESSIONS("会话", R.drawable.ic_sessions),
+    SETTINGS("设置", R.drawable.ic_settings)
+}
+
 class MainActivity : ComponentActivity() {
+    internal var sessionsRequested by mutableIntStateOf(0)
+        private set
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        if (intent.action == ConnectionService.ACTION_SESSIONS) sessionsRequested++
+    }
+
     internal var onTerminalFontSizeChange: ((Int) -> Unit)? = null
     private val consumedVolumeKeys = mutableSetOf<Int>()
 
@@ -63,6 +78,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (savedInstanceState == null && intent.action == ConnectionService.ACTION_SESSIONS) sessionsRequested++
         enableEdgeToEdge()
         setContent {
             val model: ShellDeckModel = viewModel()
@@ -84,28 +100,50 @@ private fun ShellDeckApp(model: ShellDeckModel, activity: MainActivity) {
     var importing by remember { mutableStateOf(false) }
     var login by remember { mutableStateOf<HostRecord?>(null) }
     var closing by remember { mutableStateOf<String?>(null) }
-    var showSettings by rememberSaveable { mutableStateOf(false) }
-    var switching by remember { mutableStateOf(false) }
+    var page by rememberSaveable { mutableStateOf(MainPage.HOSTS) }
+    var showIdentities by rememberSaveable { mutableStateOf(false) }
+    var editingKeyboard by remember { mutableStateOf(false) }
     var deletingHost by remember { mutableStateOf<HostRecord?>(null) }
     var deletingIdentity by remember { mutableStateOf<IdentityRecord?>(null) }
     val manager = model.sessionManager
+    LaunchedEffect(activity.sessionsRequested) {
+        if (activity.sessionsRequested > 0) {
+            manager.home(); page = MainPage.SESSIONS; showIdentities = false; editingKeyboard = false
+        }
+    }
     val connection = manager.selected
-    val terminal = if (showSettings) null else connection?.terminal
-    var terminalMenu by remember(connection?.id, showSettings) { mutableStateOf(false) }
-    val volumeChangesFont = terminal != null && closing == null && !switching && !terminalMenu &&
+    val terminal = connection?.terminal
+    val showSettings = terminal == null && page == MainPage.SETTINGS && !showIdentities
+    val background = terminal?.let { Color(it.backgroundColor) } ?: MaterialTheme.colorScheme.background
+    val foreground = terminal?.let { Color(it.foregroundColor) } ?: MaterialTheme.colorScheme.onBackground
+    SideEffect {
+        WindowCompat.getInsetsController(activity.window, activity.window.decorView).apply {
+            isAppearanceLightStatusBars = background.luminance() > 0.5f
+            isAppearanceLightNavigationBars = background.luminance() > 0.5f
+        }
+    }
+    val volumeChangesFont = terminal != null && closing == null &&
         connection?.challenge == null && connection?.passphraseIdentity == null && model.error == null
     DisposableEffect(activity, volumeChangesFont) {
         activity.onTerminalFontSizeChange = if (volumeChangesFont) model::adjustFontSize else null
         onDispose { activity.onTerminalFontSizeChange = null }
     }
     BackHandler(terminal != null && !showSettings) {
-        if (terminal?.hideKeyboardIfVisible() != true) manager.home()
+        if (terminal?.hideKeyboardIfVisible() != true) { manager.home(); page = MainPage.SESSIONS }
     }
-    Scaffold { insets ->
+    BackHandler(terminal == null && showIdentities) { showIdentities = false }
+    Scaffold(containerColor = background, contentColor = foreground, bottomBar = {
+        if (terminal == null && !editingKeyboard) NavigationBar(Modifier.testTag("main-navigation")) {
+            MainPage.entries.forEach { item -> NavigationBarItem(
+                selected = page == item, onClick = { page = item; showIdentities = false },
+                icon = { Icon(painterResource(item.icon), contentDescription = null) },
+                label = { Text(item.label) }, modifier = Modifier.testTag("page-${item.name}")) }
+        }
+    }) { insets ->
         // A terminal resize reaches the remote TUI. Use the IME destination, not each animation frame.
         val keyboardInsets = terminalKeyboardInsets(terminal != null)
         Column(Modifier.fillMaxSize().padding(insets).consumeWindowInsets(insets).windowInsetsPadding(keyboardInsets)) {
-            if (showSettings) SettingsScreen(model) { showSettings = false }
+            if (showSettings) SettingsScreen(model, onIdentities = { showIdentities = true }, onEditorVisibilityChanged = { editingKeyboard = it }) { page = MainPage.HOSTS }
             else if (terminal != null && connection != null) {
                 if (connection.status != "已连接" || connection.ended) {
                     Text(connection.status, Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
@@ -115,41 +153,21 @@ private fun ShellDeckApp(model: ShellDeckModel, activity: MainActivity) {
                     AndroidView(factory = terminal::createView, modifier = Modifier.weight(1f).fillMaxWidth(),
                         onRelease = terminal::releaseView, update = {})
                 }
-                Row(Modifier.fillMaxWidth()) {
-                    Box(Modifier.weight(1f)) { ExtraKeysBar(model.settings.keyboard, terminal) }
-                    // Management controls share the existing two key rows, leaving the terminal full height.
-                    Column(Modifier.width(48.dp)) {
-                        Box {
-                            IconButton(onClick = { terminalMenu = true }, modifier = Modifier.size(48.dp)) {
-                                Icon(painterResource(R.drawable.ic_more_vert), contentDescription = "终端菜单")
-                            }
-                            DropdownMenu(expanded = terminalMenu, onDismissRequest = { terminalMenu = false }) {
-                                DropdownMenuItem(enabled = false, text = { Column {
-                                    Text(connection.host.label, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                    Text(connection.status, style = MaterialTheme.typography.labelSmall)
-                                } }, onClick = {})
-                                DropdownMenuItem(text = { Text("切换会话（${manager.sessions.size}）") }, onClick = { terminalMenu = false; switching = true })
-                                DropdownMenuItem(text = { Text("设置") }, onClick = { terminalMenu = false; terminal.leave(); showSettings = true })
-                                DropdownMenuItem(text = { Text("返回首页（保持连接）") }, onClick = { terminalMenu = false; manager.home() })
-                                DropdownMenuItem(text = { Text("关闭连接") }, onClick = { terminalMenu = false; closing = connection.id })
-                            }
-                        }
-                        TextButton(onClick = { switching = true }, modifier = Modifier.size(48.dp).semantics { contentDescription = "切换会话" },
-                            contentPadding = PaddingValues(0.dp)) { Text(manager.sessions.size.toString()) }
-                    }
-                }
+                ExtraKeysBar(model.settings.keyboard, terminal, model.settings.keyboardSizing)
             } else {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("ShellDeck", Modifier.padding(16.dp), style = MaterialTheme.typography.headlineMedium)
-                    TextButton(onClick = { showSettings = true }) { Text("设置") }
+                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    if (showIdentities) TextButton(onClick = { showIdentities = false }) { Text("返回") }
+                    Text(if (showIdentities) "SSH 身份与密钥" else if (page == MainPage.SESSIONS) "活动会话" else page.label,
+                        Modifier.padding(16.dp), style = MaterialTheme.typography.headlineMedium)
                 }
                 Row {
-                    TextButton(enabled = !model.busy, onClick = { editing = null; hostEditor = true }) { Text("添加服务器") }
-                    TextButton(enabled = !model.busy, onClick = { importing = true }) { Text("导入 SSH Key") }
+                    if (page == MainPage.HOSTS) TextButton(enabled = !model.busy, onClick = { editing = null; hostEditor = true }) { Text("添加服务器") }
+                    if (showIdentities) TextButton(enabled = !model.busy, onClick = { importing = true }) { Text("导入 SSH Key") }
                 }
                 if (model.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
                 LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    if (manager.sessions.isNotEmpty()) item { Text("活动会话", style = MaterialTheme.typography.titleLarge) }
+                    if (page == MainPage.SESSIONS) {
+                    if (manager.sessions.isEmpty()) item { Text("还没有会话，从服务器页面开始连接。") }
                     items(manager.sessions, key = { "session:${it.id}" }) { session ->
                         OutlinedCard(Modifier.fillMaxWidth()) {
                             Column(Modifier.padding(12.dp)) {
@@ -162,27 +180,34 @@ private fun ShellDeckApp(model: ShellDeckModel, activity: MainActivity) {
                             }
                         }
                     }
-                    item { Text("服务器", style = MaterialTheme.typography.titleLarge) }
+                    }
+                    if (page == MainPage.HOSTS) {
                     if (model.hosts.isEmpty()) item {
-                        Text("先导入 SSH 私钥，再添加服务器。私钥会加密保存，口令仅用于本次操作。")
+                        Text("添加常用服务器，点击卡片即可连接。私钥可在设置中的「SSH 身份与密钥」导入。")
                     }
                     items(model.hosts, key = { it.id }) { host ->
-                        Card(Modifier.fillMaxWidth()) {
-                            Column(Modifier.padding(12.dp)) {
-                                Text(host.label, style = MaterialTheme.typography.titleMedium)
-                                Text("${host.username}@${host.hostname}:${host.port}")
-                                Text(model.identities.firstOrNull { it.id == host.identityId }?.label ?: "密码登录", style = MaterialTheme.typography.bodySmall)
-                                Row {
-                                    TextButton(enabled = !model.busy, onClick = {
-                                        if (host.identityId == null) login = host else model.connect(host, "")
-                                    }) { Text("连接") }
-                                    TextButton(enabled = !model.busy, onClick = { editing = host; hostEditor = true }) { Text("编辑") }
-                                    TextButton(enabled = !model.busy, onClick = { deletingHost = host }) { Text("删除") }
+                        var hostMenu by remember(host.id) { mutableStateOf(false) }
+                        Card(onClick = { if (host.identityId == null) login = host else model.connect(host, "") },
+                            enabled = !model.busy, modifier = Modifier.fillMaxWidth().testTag("host-${host.id}")) {
+                            Row(Modifier.padding(12.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(host.label, style = MaterialTheme.typography.titleMedium)
+                                    Text("${host.username}@${host.hostname}:${host.port}")
+                                    Text(model.identities.firstOrNull { it.id == host.identityId }?.label ?: "密码登录", style = MaterialTheme.typography.bodySmall)
+                                }
+                                Box {
+                                    IconButton(onClick = { hostMenu = true }) { Icon(painterResource(R.drawable.ic_more_vert), contentDescription = "${host.label} 的更多操作") }
+                                    DropdownMenu(expanded = hostMenu, onDismissRequest = { hostMenu = false }) {
+                                        DropdownMenuItem(text = { Text("编辑服务器") }, enabled = !model.busy, onClick = { hostMenu = false; editing = host; hostEditor = true })
+                                        DropdownMenuItem(text = { Text("删除服务器") }, enabled = !model.busy, onClick = { hostMenu = false; deletingHost = host })
+                                    }
                                 }
                             }
                         }
                     }
-                    item { Text("Identities", style = MaterialTheme.typography.titleLarge) }
+                    }
+                    if (showIdentities) {
+                    if (model.identities.isEmpty()) item { Text("导入可供多个服务器共用的 SSH 私钥。私钥加密保存，口令仅用于本次操作。") }
                     items(model.identities, key = { it.id }) { identity ->
                         OutlinedCard(Modifier.fillMaxWidth()) {
                             Column(Modifier.padding(12.dp)) {
@@ -192,6 +217,7 @@ private fun ShellDeckApp(model: ShellDeckModel, activity: MainActivity) {
                                 TextButton(enabled = !model.busy, onClick = { deletingIdentity = identity }) { Text("删除身份") }
                             }
                         }
+                    }
                     }
                 }
             }
@@ -243,13 +269,6 @@ private fun ShellDeckApp(model: ShellDeckModel, activity: MainActivity) {
     closing?.let { id -> ConfirmDialog("关闭连接？", "只关闭这一条 SSH 连接。远端 tmux 会话可以在下次连接时重新附加。", { closing = null }) {
         manager.close(id); closing = null
     } }
-    if (switching) AlertDialog(onDismissRequest = { switching = false }, title = { Text("切换会话") },
-        text = { Column(Modifier.verticalScroll(rememberScrollState())) {
-            TextButton(onClick = { manager.home(); switching = false }) { Text("返回首页（保持连接）") }
-            manager.sessions.forEach { session -> TextButton(onClick = { manager.select(session.id); switching = false }) {
-                Text("${session.host.label} · ${session.id.take(4)} — ${session.status}")
-            } }
-        } }, confirmButton = { TextButton(onClick = { switching = false }) { Text("取消") } })
     deletingHost?.let { host -> ConfirmDialog("删除服务器？", host.label, { deletingHost = null }) { model.deleteHost(host.id); deletingHost = null } }
     deletingIdentity?.let { identity -> ConfirmDialog("删除身份？", "${identity.label}：删除后需要重新导入私钥。", { deletingIdentity = null }) { model.deleteIdentity(identity.id); deletingIdentity = null } }
     model.error?.let { message -> AlertDialog(onDismissRequest = model::clearError, title = { Text("操作未完成") }, text = { Text(message) }, confirmButton = { TextButton(onClick = model::clearError) { Text("确定") } }) }

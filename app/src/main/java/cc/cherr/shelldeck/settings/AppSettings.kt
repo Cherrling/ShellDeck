@@ -6,13 +6,16 @@ import cc.cherr.shelldeck.keyboard.*
 import org.json.JSONArray
 import org.json.JSONObject
 
+enum class BackgroundMode { OFF, NORMAL, ONGOING }
+
 enum class ThemeMode { SYSTEM, LIGHT, DARK }
 enum class TerminalPalette { DARK, LIGHT }
 data class AppSettings(val theme: ThemeMode = ThemeMode.SYSTEM, val dynamicColor: Boolean = true,
     val fontId: String = "maple", val fontSize: Int = 14, val palette: TerminalPalette = TerminalPalette.DARK,
-    val keyboard: KeyboardProfile = KeyboardProfile.default())
+    val keyboard: KeyboardProfile = KeyboardProfile.default(), val keyboardSizing: KeyboardSizing = KeyboardSizing(),
+    val backgroundMode: BackgroundMode = BackgroundMode.NORMAL)
 
-/** Only appearance/input preferences. SSH credentials never enter this store. */
+/** Non-secret preferences only. SSH credentials never enter this store. */
 class SettingsStore(context: Context) {
     private val prefs = context.getSharedPreferences("appearance_and_keyboard", Context.MODE_PRIVATE)
     fun read(): AppSettings = try {
@@ -20,14 +23,21 @@ class SettingsStore(context: Context) {
         AppSettings(ThemeMode.valueOf(root.optString("theme", "SYSTEM")), root.optBoolean("dynamic", true),
             root.optString("font", "maple"), root.optInt("size", 14).coerceIn(8, 32),
             TerminalPalette.valueOf(root.optString("palette", "DARK")),
-            root.optJSONArray("keyboard")?.let(::decodeKeyboard) ?: KeyboardProfile.default())
+            root.optJSONArray("keyboard")?.let(::decodeKeyboard) ?: KeyboardProfile.default(),
+            root.optJSONObject("keyboardSizing")?.let {
+                KeyboardSizing(it.optInt("height", 38).coerceIn(28, 56), it.optInt("width", 48).coerceIn(32, 80), it.optInt("text", 12).coerceIn(10, 18))
+            } ?: KeyboardSizing(),
+            BackgroundMode.entries.firstOrNull { it.name == root.optString("backgroundMode") } ?: BackgroundMode.NORMAL)
     } catch (_: Exception) { AppSettings() }
     fun save(settings: AppSettings) {
         settings.keyboard.validate()
+        settings.keyboardSizing.validate()
         require(settings.fontSize in 8..32)
         val root = JSONObject().put("version", 1).put("theme", settings.theme.name).put("dynamic", settings.dynamicColor)
             .put("font", settings.fontId).put("size", settings.fontSize).put("palette", settings.palette.name)
+            .put("backgroundMode", settings.backgroundMode.name)
             .put("keyboard", encodeKeyboard(settings.keyboard))
+            .put("keyboardSizing", JSONObject().put("height", settings.keyboardSizing.rowHeight).put("width", settings.keyboardSizing.keyWidth).put("text", settings.keyboardSizing.textSize))
         prefs.edit { putString("settings", root.toString()) }
     }
     companion object {

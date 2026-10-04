@@ -50,3 +50,21 @@ data class KeyboardProfile(val rows: List<List<KeySlot>>) {
                 KeySlot("↑", KeyAction.Special(SpecialKey.UP)), KeySlot("→", KeyAction.Special(SpecialKey.RIGHT)))))
     }
 }
+
+/** Physical toolbar dimensions, independent of the terminal's font size. */
+data class KeyboardSizing(val rowHeight: Int = 38, val keyWidth: Int = 48, val textSize: Int = 12) {
+    fun validate() { require(rowHeight in 28..56 && keyWidth in 32..80 && textSize in 10..18) }
+}
+
+data class KeyPosition(val row: Int, val index: Int)
+
+/** Destination is an insertion gap in the original row, not a swap target. */
+fun KeyboardProfile.moveKey(from: KeyPosition, to: KeyPosition): KeyboardProfile {
+    if (from.row !in rows.indices || to.row !in rows.indices || from.index !in rows[from.row].indices || to.index !in 0..rows[to.row].size) return this
+    if (from.row != to.row && (rows[from.row].size <= 1 || rows[to.row].size >= 32)) return this
+    val copy = rows.map { it.toMutableList() }
+    val key = copy[from.row].removeAt(from.index)
+    val insertion = to.index - if (from.row == to.row && to.index > from.index) 1 else 0
+    copy[to.row].add(insertion, key)
+    return KeyboardProfile(copy).also { it.validate() }
+}

@@ -2,14 +2,14 @@
 
 面向远程开发、tmux 和现代 TUI 工作流的 Android SSH 客户端。
 
-当前开发版本 alpha.5 已加入多会话、设置页、两行可编辑快捷键及字体管理，暂未推送或发布。公开版本仍为 [alpha.4](https://github.com/Cherrling/ShellDeck/releases/tag/v0.1.0-alpha.4)。
+安装入口统一为 [滚动更新 Release](https://github.com/Cherrling/ShellDeck/releases/tag/rolling)：只分发正式签名的 `cc.cherr.shelldeck` APK，沿用原签名并递增 versionCode，可直接覆盖更新。main 的 CI 通过后自动更新该入口。
 
-- 首页显示活动会话；终端返回先收起键盘，再返回首页，保持连接。关闭按钮只关闭指定会话，同一 Host 可开多条连接。
-- 两行快捷键整体横向滑动；设置页可编辑标签、字符、特殊键/组合键、修饰键、转义序列、宏、宽度和位置。Shift / Ctrl / Alt 支持一次性、按住及长按锁定，切换会话清理状态。
+- 主界面为服务器、会话、设置三个底部页面。点击主机卡片连接，编辑/删除在卡片菜单；密钥管理放在设置中的 SSH 身份与密钥。终端返回先收键盘，再回会话页并保持连接。
+- 两行快捷键整体横向滑动；编辑器支持长按拖拽排序、跨行移动和边缘自动滚动，点击按键编辑内容。行高、按键宽度和文字大小可调，默认单行 38 dp、单倍宽 48 dp、文字 12 sp。Shift / Ctrl / Alt 支持一次性、按住及长按锁定，切换会话清理状态。
 - 内置 Maple Mono NF CN Regular，支持系统字体和导入 TTF / OTF、重命名、删除、字号及预览。终端内可用音量 ＋ / − 调整字号。
-- 正常连接时隐藏独立标题栏，管理入口收进快捷键栏右侧固定菜单，留出更多终端空间。
+- 正常连接时隐藏独立标题栏，快捷键占满整行，右下角不再放管理按钮。系统栏图标跟随实际页面/终端背景，深色终端使用浅色图标。
 - App 支持跟随系统/明亮/深色与动态配色；终端默认前景/背景独立设置。
-- 继续支持加密 Identity、OpenSSH / PEM / PKCS#8 导入、按需口令和服务器指纹验证。当前会话由根 ViewModel 管理，应用内导航与配置变化保持连接；尚无前台服务、后台保活、网络自动重连或进程死亡恢复。
+- 继续支持加密 Identity、OpenSSH / PEM / PKCS#8 导入、按需口令和服务器指纹验证。会话由应用级管理器与可选前台服务管理，支持关闭后台保持、静默通知和尽量常驻通知；划除不补发，最后一个连接结束即停止服务。仍不提供网络自动重连或进程死亡恢复，厂商后台限制与长期熄屏仍需真机验证。
 
 
 ## 开发环境
@@ -30,7 +30,7 @@ python3 -m unittest discover -s scripts -p 'test_*.py'
 python3 scripts/ssh_test_server.py -- python3 scripts/android_ssh_tests.py --serial emulator-5554
 ```
 
-该入口仅使用临时测试密钥，通过 adb reverse 连接 loopback sshd；结束时清理测试密钥和端口转发。普通 connectedDebugAndroidTest 未提供测试服务时会跳过两组真实 SSH 设备用例，不应算作完整验证。
+该入口仅使用临时测试密钥，通过 adb reverse 连接 loopback sshd；结束时清理测试密钥和端口转发。普通 connectedDebugAndroidTest 未提供测试服务时会跳过真实 SSH 设备用例，不应算作完整验证。
 
 APK 在 `app/build/outputs/apk/debug/app-debug.apk`。测试命令需要本机 OpenSSH sshd / ssh-keygen 和 OpenSSL，只启动临时 loopback 公钥认证服务；测试密钥在退出时删除。终端模块包含上游回归测试和会话接入测试；Python 测试覆盖发布版本、包名、debuggable 和签名指纹的校验逻辑。
 
@@ -38,10 +38,13 @@ APK 在 `app/build/outputs/apk/debug/app-debug.apk`。测试命令需要本机 O
 
 ## 自动构建与发布
 
-- PR、push main、手动触发 CI：检查并上传开发 APK Artifact。
+- PR、push main、手动触发 CI：执行检查和内部 debug 构建，不上传 Dev APK。
+- main CI 成功：Release 工作流检出已验证的精确提交，构建并验签，更新固定 rolling Release、源码包及校验文件。旧提交重跑不会覆盖更新的 main。
 - push `v*` tag：检查版本与来源，测试、lint、签名构建、验签，发布 GitHub Release。
 - GitHub 仓库：[Cherrling/ShellDeck](https://github.com/Cherrling/ShellDeck)。后续正式发布使用已配置的固定签名 Secrets。详见 [发布说明](docs/development/releases.md)。
-- 本地 alpha.5 实现和验证见 [会话与设置记录](docs/development/sessions-settings-alpha5.md)。
+- [后台会话与通知](docs/development/background-connections.md)。
+- [Rolling code 6 本地验证](docs/development/rolling-code6-validation.md)。
+- 初始多会话实现和验证见 [会话与设置记录](docs/development/sessions-settings-alpha5.md)。
 - SSH 版验证见 [alpha.3 验证记录](docs/development/ssh-alpha3-validation.md)。
 - 早期构建与检查结果见 [终端验证版记录](docs/development/terminal-lab-validation.md) 和 [初始化验证记录](docs/development/bootstrap-validation.md)。
 

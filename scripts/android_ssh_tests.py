@@ -20,6 +20,10 @@ def main():
         subprocess.run(adb + ["shell", "run-as", app, "mkdir", "-p", "files"], check=True)
         with (root / "ed25519").open("rb") as key:
             subprocess.run(adb + ["shell", "run-as", app, "sh", "-c", "'cat > files/test-ssh-key'"], stdin=key, check=True)
+        sdk = int(subprocess.check_output(adb + ["shell", "getprop", "ro.build.version.sdk"], text=True).strip())
+        if sdk >= 33:
+            # Revoke before instrumentation: revocation during a test can kill its process.
+            subprocess.run(adb + ["shell", "pm", "revoke", app, "android.permission.POST_NOTIFICATIONS"], check=True)
         result = subprocess.run(["./gradlew", ":app:connectedDebugAndroidTest", "--console=plain",
             f"-Pandroid.testInstrumentationRunnerArguments.sshPort={port}",
             f"-Pandroid.testInstrumentationRunnerArguments.sshUser={os.environ['SSH_TEST_USER']}"])

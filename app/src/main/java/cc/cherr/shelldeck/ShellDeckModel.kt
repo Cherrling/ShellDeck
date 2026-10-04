@@ -8,7 +8,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
-import androidx.room.Room
 import cc.cherr.shelldeck.data.*
 import cc.cherr.shelldeck.ssh.*
 import cc.cherr.shelldeck.settings.*
@@ -22,11 +21,12 @@ import java.util.concurrent.Executors
 class ShellDeckModel(application: Application) : AndroidViewModel(application) {
     private val main = Handler(Looper.getMainLooper())
     private val worker = Executors.newSingleThreadExecutor()
-    private val database = Room.databaseBuilder(application, ShellDeckDatabase::class.java, "shelldeck.db").build()
-    private val dao = database.records()
-    private val vault = CredentialVault()
+    private val runtime = (application as ShellDeckApplication).runtime
+    private val dao = runtime.dao
+    private val vault = runtime.vault
     @Volatile private var cleared = false
-    val sessionManager = SessionManager(application, dao, vault)
+    val sessionManager = runtime.sessions
+    val backgroundError get() = runtime.backgroundError
     private val settingsStore = SettingsStore(application)
     private val fontStore = FontStore(application)
     var settings by mutableStateOf(settingsStore.read()); private set
@@ -38,10 +38,11 @@ class ShellDeckModel(application: Application) : AndroidViewModel(application) {
     var identities by mutableStateOf<List<IdentityRecord>>(emptyList()); private set
     var busy by mutableStateOf(false); private set
     var error by mutableStateOf<String?>(null); private set
-    init { refresh(); reloadFonts(); applyPalette(settings.palette) }
+    init { runtime.attachUi(); refresh(); reloadFonts(); applyPalette(settings.palette) }
     fun updateSettings(value: AppSettings) {
         settingsStore.save(value)
         val old = settings; settings = value
+        if (old.backgroundMode != value.backgroundMode) runtime.changeMode(value.backgroundMode)
         if (old.palette != value.palette) applyPalette(value.palette)
         if (old.fontId != value.fontId) reloadFonts()
         sessionManager.sessions.forEach { it.terminal.appearance(typeface, value.fontSize) }
@@ -153,10 +154,11 @@ class ShellDeckModel(application: Application) : AndroidViewModel(application) {
     }
     fun connect(host: HostRecord, secret: String) {
         sessionManager.connect(host, secret)
+        runtime.userRequestedConnection()
         sessionManager.selected?.terminal?.appearance(typeface, settings.fontSize)
     }
     override fun onCleared() {
-        cleared = true; sessionManager.closeAll()
-        worker.execute { database.close() }; worker.shutdown()
+        cleared = true; runtime.detachUi()
+        worker.shutdown()
     }
 }
