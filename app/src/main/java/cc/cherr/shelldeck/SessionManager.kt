@@ -19,17 +19,32 @@ class SessionManager(private val application: Application, private val dao: Stor
     var selectedId by mutableStateOf<String?>(null); private set
     val selected get() = sessions.firstOrNull { it.id == selectedId }
     val activeCount get() = sessions.count { !it.ended }
-    fun connect(host: HostRecord, secret: String) {
+    private val retries = mutableMapOf<String, String>()
+    fun connect(host: HostRecord, secret: String): SessionConnection {
+        // Repeated taps while authentication is pending select that attempt instead of opening another.
+        sessions.firstOrNull { it.host.id == host.id && !it.ended && !it.terminal.session.isReady }?.let {
+            select(it.id); return it
+        }
         selected?.terminal?.leave()
         val connection = SessionConnection(application, host, dao, vault, secret, nextSessionNumber++, changed)
         sessions.add(connection); selectedId = connection.id; changed()
+        return connection
+    }
+    fun reconnect(id: String, secret: String, host: HostRecord? = null): SessionConnection? {
+        val previous = sessions.firstOrNull { it.id == id } ?: return null
+        if (!previous.ended) { select(id); return previous }
+        retries[id]?.let { retryId -> sessions.firstOrNull { it.id == retryId && !it.ended } }?.let {
+            select(it.id); return it
+        }
+        // A fresh SSH channel cannot resume an old shell. Keep its terminal available for review.
+        return connect(host ?: previous.host, secret).also { retries[id] = it.id }
     }
     fun select(id: String) { require(sessions.any { it.id == id }); selected?.terminal?.leave(); selectedId = id }
     fun home() { selected?.terminal?.leave(); selectedId = null }
     fun close(id: String) {
         val connection = sessions.firstOrNull { it.id == id } ?: return
         if (selectedId == id) home()
-        connection.close(); sessions.remove(connection); changed()
+        connection.close(); sessions.remove(connection); retries.remove(id); changed()
     }
     fun closeAll() { sessions.toList().forEach { close(it.id) } }
 }
@@ -39,7 +54,9 @@ class SessionConnection(application: Application, val host: HostRecord, dao: Sto
     private val main = Handler(Looper.getMainLooper())
     private var disposed = false
     var ended by mutableStateOf(false); private set
-    var status by mutableStateOf("准备连接…"); private set
+    var state by mutableStateOf(ConnectionState.PREPARING); private set
+    val status get() = state.message
+    val connected get() = state == ConnectionState.CONNECTED && !ended
     var challenge by mutableStateOf<HostChallenge?>(null); private set
     var passphraseIdentity by mutableStateOf<String?>(null); private set
     private var pendingTrust: CompletableFuture<TrustDecision>? = null
@@ -56,7 +73,7 @@ class SessionConnection(application: Application, val host: HostRecord, dao: Sto
                 val future = CompletableFuture<TrustDecision>()
                 main.post {
                     if (disposed || ended || future.isDone) future.complete(TrustDecision.CANCEL)
-                    else { pendingTrust = future; challenge = request }
+                    else { pendingTrust = future; challenge = request; state = ConnectionState.VERIFYING }
                 }
                 try { future.get(90, TimeUnit.SECONDS) }
                 catch (_: Exception) { TrustDecision.CANCEL }
@@ -78,7 +95,7 @@ class SessionConnection(application: Application, val host: HostRecord, dao: Sto
                                 val future = CompletableFuture<CharArray?>()
                                 main.post {
                                     if (disposed || ended || future.isDone) future.complete(null)
-                                    else { pendingPassphrase = future; passphraseIdentity = identity.label; status = "等待私钥口令…" }
+                                    else { pendingPassphrase = future; passphraseIdentity = identity.label; state = ConnectionState.PASSPHRASE }
                                 }
                                 try { future.get(90, TimeUnit.SECONDS) }
                                 catch (_: Exception) { future.complete(null); future.getNow(null)?.fill('\u0000'); null }
@@ -91,23 +108,26 @@ class SessionConnection(application: Application, val host: HostRecord, dao: Sto
                         } finally { bytes.fill(0) }
                     }
                 } finally { password.fill('\u0000') }
-            }, status = { message -> main.post { if (!disposed) status = message } })
+            }, status = { value -> main.post { if (!disposed && !ended && !state.terminal) state = value } })
         terminal.session = TerminalSession(transport, 5000, terminal)
         // Start independently of composition; a quick navigation must not leave an unstarted connection.
         terminal.session.updateSize(80, 24, 8, 16)
     }
-    fun trust(decision: TrustDecision) { pendingTrust?.complete(decision); challenge = null }
+    fun trust(decision: TrustDecision) {
+        if (pendingTrust?.complete(decision) == true) state = if (decision == TrustDecision.CANCEL) ConnectionState.CANCELLED else ConnectionState.CONNECTING
+        challenge = null
+    }
     fun submitPassphrase(secret: String) {
         val chars = secret.toCharArray()
-        if (pendingPassphrase?.complete(chars) != true) chars.fill('\u0000')
+        if (pendingPassphrase?.complete(chars) != true) chars.fill('\u0000') else state = ConnectionState.AUTHENTICATING
         passphraseIdentity = null
     }
     private fun finish() {
         if (ended) return
-        ended = true; password.fill('\u0000')
+        ended = true; if (!state.terminal) state = ConnectionState.ENDED; password.fill('\u0000')
         pendingTrust?.complete(TrustDecision.CANCEL); pendingTrust = null; challenge = null
         pendingPassphrase?.complete(null); pendingPassphrase = null; passphraseIdentity = null
         changed()
     }
-    fun close() { disposed = true; finish(); terminal.close() }
+    fun close() { disposed = true; state = ConnectionState.CLOSED; finish(); terminal.close() }
 }

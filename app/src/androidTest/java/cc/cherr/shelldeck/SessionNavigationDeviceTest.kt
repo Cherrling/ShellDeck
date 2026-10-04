@@ -73,6 +73,7 @@ class SessionNavigationDeviceTest {
             ui.onNodeWithTag("page-SESSIONS").assertIsSelected()
             ui.runOnUiThread { connection.terminal.session.write("printf '\\033]2;Codex project test\\007'; sleep 30\n") }
             ui.waitUntil(5000) { connection.terminal.title == "Codex project test" }
+            ui.waitUntil(3000) { ui.onAllNodesWithText("Codex project test", substring = false).fetchSemanticsNodes().isNotEmpty() }
             ui.onNodeWithText("Codex project test", substring = false).assertIsDisplayed()
             ui.onNodeWithText("Navigation test host · 会话 ${connection.number}").assertIsDisplayed()
             ui.runOnIdle { assertTrue(androidx.core.view.WindowCompat.getInsetsController(ui.activity.window, ui.activity.window.decorView).isAppearanceLightStatusBars) }
@@ -94,6 +95,22 @@ class SessionNavigationDeviceTest {
             ui.runOnIdle { assertNull(model.sessionManager.selected); assertFalse(connection.ended) }
             ui.onNodeWithText("取消", substring = false).performClick()
             ui.runOnIdle { assertTrue(connection.terminal.session.isReady) }
+            // A closed transport leaves its output readable and exposes a single explicit retry action.
+            ui.onNodeWithTag("session-${connection.id}").performClick()
+            ui.runOnUiThread { connection.terminal.session.finishIfRunning() }
+            ui.waitUntil(5000) { connection.ended }
+            ui.onNodeWithContentDescription("重新连接").performClick()
+            ui.waitUntil(10000) { model.sessionManager.selected?.challenge != null }
+            val retry = model.sessionManager.selected!!
+            ui.onNodeWithText("仅信任本次").performClick()
+            ui.waitUntil(10000) { retry.terminal.session.isReady }
+            ui.runOnIdle {
+                assertNotEquals(connection.id, retry.id)
+                assertTrue(retry.number > connection.number)
+                assertEquals("Codex project test", connection.terminal.title)
+                model.sessionManager.close(retry.id)
+                model.sessionManager.home()
+            }
             ui.onNodeWithTag("close-session-${connection.id}").performClick()
             ui.onNodeWithText("确认", substring = false).performClick()
             ui.runOnIdle { assertTrue(model.sessionManager.sessions.isEmpty()); assertTrue(connection.ended) }

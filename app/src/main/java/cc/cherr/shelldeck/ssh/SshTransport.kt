@@ -21,7 +21,7 @@ class SshTransport(
     private val username: String,
     private val verify: HostKeyVerifier,
     private val authenticate: (SSHClient) -> Unit,
-    private val status: (String) -> Unit,
+    private val status: (ConnectionState) -> Unit,
 ) : TerminalTransport {
     private val closed = AtomicBoolean()
     private val outputLock = Any()
@@ -31,7 +31,7 @@ class SshTransport(
     private val reader = Executors.newSingleThreadExecutor()
     private val writer = ThreadPoolExecutor(1, 1, 0, TimeUnit.MILLISECONDS, ArrayBlockingQueue(256))
     private val socket = Socket()
-    @Volatile private var client: SSHClient? = null
+    private val client = java.util.concurrent.atomic.AtomicReference<SSHClient?>()
     @Volatile private var shell: Session.Shell? = null
     private var listener: TerminalTransport.Listener? = null
     override fun start(initial: TerminalSize, listener: TerminalTransport.Listener) {
@@ -41,7 +41,8 @@ class SshTransport(
             try {
                 check(!closed.get())
                 SshKeys.configure()
-                val ssh = SSHClient().also { client = it }
+                val ssh = SSHClient().also { client.set(it) }
+                check(!closed.get())
                 ssh.socketFactory = object : SocketFactory() {
                     override fun createSocket(): Socket = socket
                     override fun createSocket(h: String, p: Int): Socket = error("Unused")
@@ -52,11 +53,11 @@ class SshTransport(
                 ssh.connectTimeout = 15_000
                 ssh.transport.timeoutMs = 120_000 // Allows time for the fingerprint dialog.
                 ssh.addHostKeyVerifier(verify)
-                status("正在连接并验证服务器…")
+                status(ConnectionState.CONNECTING)
                 ssh.connect(hostname, port)
                 check(!closed.get())
                 ssh.transport.timeoutMs = 20_000
-                status("正在认证…")
+                status(ConnectionState.AUTHENTICATING)
                 authenticate(ssh)
                 check(!closed.get())
                 val channel = ssh.startSession()
@@ -66,7 +67,7 @@ class SshTransport(
                 try { channel.setEnvVar("COLORTERM", "truecolor") } catch (_: java.io.IOException) { }
                 val active = channel.startShell().also { shell = it }
                 check(!closed.get())
-                status("已连接")
+                status(ConnectionState.CONNECTED)
                 listener.onReady()
                 val bytes = ByteArray(16 * 1024)
                 while (!closed.get()) {
@@ -75,18 +76,21 @@ class SshTransport(
                     if (count > 0) listener.onBytes(bytes, count)
                 }
                 result = 0
-                if (!closed.get()) status("连接已结束")
+                if (!closed.get()) status(ConnectionState.ENDED)
             } catch (failure: Exception) {
                 if (!closed.get()) status(when (failure) {
-                    is net.schmizz.sshj.userauth.UserAuthException -> "认证失败，请检查用户名、密钥或口令"
-                    is java.net.UnknownHostException -> "无法解析服务器地址"
-                    is java.net.ConnectException -> "无法连接服务器，请检查地址与端口"
-                    is java.net.SocketTimeoutException -> "连接超时"
-                    else -> "连接失败：请检查网络、服务器指纹及认证信息"
+                    is net.schmizz.sshj.userauth.UserAuthException -> ConnectionState.AUTH_FAILED
+                    is java.net.UnknownHostException -> ConnectionState.ADDRESS_FAILED
+                    is java.net.ConnectException -> ConnectionState.CONNECT_FAILED
+                    is java.net.SocketTimeoutException -> ConnectionState.TIMEOUT
+                    else -> ConnectionState.FAILED
                 })
             } finally {
-                listener.onClosed(result)
-                close()
+                try { listener.onClosed(result) } finally {
+                    close()
+                    // Covers cancellation racing with SSHClient construction/publication.
+                    closeClient()
+                }
             }
         }
     }
@@ -97,7 +101,7 @@ class SshTransport(
         } } catch (_: java.util.concurrent.RejectedExecutionException) { if (!closed.get()) failWrite() }
     }
     private fun failWrite() {
-        if (!closed.get()) status("连接已中断，或待发送输入超过限制")
+        if (!closed.get()) status(ConnectionState.IO_FAILED)
         close() // Closing the socket wakes the reader, which emits onClosed exactly once.
     }
     override fun write(bytes: ByteArray, offset: Int, count: Int) {
@@ -126,15 +130,19 @@ class SshTransport(
         requireNotNull(shell).changeWindowDimensions(size.columns, size.rows, size.windowWidthPixels(), size.windowHeightPixels())
         onApplied.run()
     }
+    private fun closeClient() {
+        // Ownership is transferred once; UI cancellation and reader completion may race.
+        try { client.getAndSet(null)?.close() } catch (_: Exception) { }
+    }
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
         // No network wait on the UI thread. Close the owned socket before SSHJ channel cleanup.
         Thread({
             try { socket.close() } catch (_: Exception) { }
-            try { client?.close() } catch (_: Exception) { }
+            closeClient()
         }, "ssh-close").start()
         synchronized(outputLock) { pendingOutput.forEach { it.fill(0) }; pendingOutput.clear() }
         writer.shutdownNow()
-        reader.shutdown() // onClosed is emitted by its finally block.
+        reader.shutdownNow() // Interrupt SSHJ handshake/auth waits too; socket close alone may not wake them.
     }
 }

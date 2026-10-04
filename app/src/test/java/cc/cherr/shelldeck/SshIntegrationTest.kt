@@ -95,4 +95,26 @@ class SshIntegrationTest {
         assertTrue(closed.await(10, TimeUnit.SECONDS))
         transport.close()
     }
+    @Test fun closingDuringHostVerificationNeverAuthenticatesAndClosesOnce() {
+        val entered = CountDownLatch(1); val release = CountDownLatch(1); val closed = CountDownLatch(1)
+        val ready = java.util.concurrent.atomic.AtomicBoolean()
+        val authenticated = java.util.concurrent.atomic.AtomicBoolean()
+        val closes = java.util.concurrent.atomic.AtomicInteger()
+        val trust = HostTrust("127.0.0.1", port, { null }, {}) {
+            entered.countDown(); release.await(10, TimeUnit.SECONDS); TrustDecision.ONCE
+        }
+        val transport = SshTransport("127.0.0.1", port, username, trust, { authenticated.set(true) }, {})
+        try {
+            transport.start(TerminalSize(80, 24, 8, 16), object : TerminalTransport.Listener {
+                override fun onReady() { ready.set(true) }
+                override fun onBytes(bytes: ByteArray, length: Int) = Unit
+                override fun onClosed(exitCode: Int) { closes.incrementAndGet(); closed.countDown() }
+            })
+            assertTrue(entered.await(10, TimeUnit.SECONDS))
+            transport.close(); transport.close(); release.countDown()
+            assertTrue(closed.await(10, TimeUnit.SECONDS))
+            assertFalse(authenticated.get()); assertFalse(ready.get()); assertEquals(1, closes.get())
+        } finally { release.countDown(); transport.close() }
+    }
+
 }

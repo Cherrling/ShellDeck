@@ -37,10 +37,18 @@ class MultiSessionDeviceTest {
         val host = HostRecord().apply { id = UUID.randomUUID().toString(); label = "Loopback"; hostname = "127.0.0.1"
             port = args.getString("sshPort")!!.toInt(); username = args.getString("sshUser")!!; this.identityId = identityId }
         try {
-            main { manager = SessionManager(app, db.records(), vault); manager.connect(host, ""); manager.connect(host, "") }
-            waitFor("two independently pending fingerprint prompts") { manager.sessions.size == 2 && manager.sessions.all { it.challenge != null } }
+            main {
+                manager = SessionManager(app, db.records(), vault)
+                manager.connect(host, ""); manager.connect(host, "")
+                assertEquals("pending attempts are coalesced", 1, manager.sessions.size)
+            }
+            waitFor("first fingerprint prompt") { manager.selected?.challenge != null }
             lateinit var first: SessionConnection; lateinit var second: SessionConnection
-            main { first = manager.sessions[0]; second = manager.sessions[1]; first.trust(TrustDecision.ONCE); second.trust(TrustDecision.ONCE) }
+            main { first = manager.selected!!; first.trust(TrustDecision.ONCE) }
+            waitFor("first authenticated") { first.terminal.session.isReady }
+            main { manager.connect(host, ""); second = manager.selected!! }
+            waitFor("second independently pending fingerprint prompt") { second.challenge != null }
+            main { second.trust(TrustDecision.ONCE) }
             main {
                 assertEquals(1L, first.number); assertEquals(2L, second.number)
                 manager.select(first.id)
@@ -54,6 +62,21 @@ class MultiSessionDeviceTest {
             waitFor("third connection waiting for its own fingerprint") { manager.selected?.challenge != null }
             main { val third = manager.selected!!; assertEquals(3L, third.number); assertEquals(2L, second.number); manager.close(third.id); assertTrue(third.ended); assertTrue(second.terminal.session.isReady) }
             main { manager.select(second.id); assertEquals(1, manager.sessions.size) }
+            main { second.terminal.session.write("printf '\\122\\105\\124\\122\\131\\137\\117\\113\\n'; exit\r") }
+            waitFor("remote exit retained") { second.ended }
+            main {
+                assertEquals(cc.cherr.shelldeck.ssh.ConnectionState.ENDED, second.state)
+                assertTrue(second.terminal.session.emulator.screen.transcriptText.contains("RETRY_OK"))
+                val retry = manager.reconnect(second.id, "")!!
+                assertSame(retry, manager.reconnect(second.id, ""))
+                assertEquals(4L, retry.number)
+                assertEquals(listOf(second.id, retry.id), manager.sessions.map { it.id })
+                assertTrue(second.terminal.session.emulator.screen.transcriptText.contains("RETRY_OK"))
+            }
+            waitFor("retry rechecks unsaved host key") { manager.selected?.challenge != null }
+            main { manager.selected!!.trust(TrustDecision.ONCE) }
+            waitFor("retry authenticated") { manager.selected!!.terminal.session.isReady }
+
         } finally { main { manager.closeAll() }; db.close() }
     }
 }
