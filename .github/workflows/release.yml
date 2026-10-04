@@ -17,6 +17,8 @@ jobs:
     timeout-minutes: 30
     environment: release
     env:
+      ANDROID_HOME: ${{ runner.temp }}/android-sdk
+      ANDROID_SDK_ROOT: ${{ runner.temp }}/android-sdk
       RELEASE_TAG: ${{ github.ref_name }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -39,16 +41,16 @@ jobs:
       - uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5
         with:
           cache-read-only: true
-      - name: Locate Android SDK
-        id: sdk
-        run: echo "root=$ANDROID_HOME" >> "$GITHUB_OUTPUT"
       - name: Cache Android SDK packages
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
-          path: |
-            ${{ steps.sdk.outputs.root }}/platforms/android-36
-            ${{ steps.sdk.outputs.root }}/build-tools/35.0.0
-          key: android-sdk-${{ runner.os }}-platform36-buildtools35-v1
+          path: ${{ env.ANDROID_HOME }}
+          key: android-sdk-${{ runner.os }}-cli15859902-platform36-buildtools35-v2
+      - name: Set up Android command-line tools
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        with:
+          cmdline-tools-version: '15859902'
+          log-accepted-android-sdk-licenses: false
       - name: Install Android SDK packages
         run: sdkmanager 'platforms;android-36' 'build-tools;35.0.0' 'platform-tools'
       - name: Prepare isolated SSH integration tests

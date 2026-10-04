@@ -88,7 +88,7 @@ python3 scripts/configure_signing.py \
 ## 缓存
 
 - `setup-gradle` 管理 Gradle 依赖和本地 build cache；启用 `org.gradle.caching=true`。可信 main 成功构建后写缓存，PR/其他分支只读。
-- Android Platform 36 与 Build Tools 35.0.0 独立缓存，key 带系统和 SDK 版本；只有 main 写入，Release 仅恢复。
+- Android CLI 15859902、Platform 36、Build Tools 35.0.0 与 platform-tools 独立缓存，SDK 初始化由固定 commit 的 setup-android 完成，key 带系统和 SDK 版本；只有 main 写入，Release 仅恢复。
 - 不重复用另一套 actions/cache 缓存同一个 Gradle User Home。
 - Release 签名步骤禁用 build cache，整个 release job 的 Gradle 缓存只读。keystore 只恢复到 RUNNER_TEMP，always 步骤清理；密钥、口令及解密文件不上传到 Artifact 或缓存。
 - 缓存缺失仍必须能完整构建。依赖升级时按需变更 SDK key，Gradle 根据输入变化使构建缓存失效。
