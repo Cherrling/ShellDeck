@@ -46,6 +46,10 @@ class ShellDeckModel(application: Application) : AndroidViewModel(application) {
         if (old.fontId != value.fontId) reloadFonts()
         sessionManager.sessions.forEach { it.terminal.appearance(typeface, value.fontSize) }
     }
+    fun adjustFontSize(delta: Int) {
+        val size = (settings.fontSize + delta).coerceIn(8, 32)
+        if (size != settings.fontSize) updateSettings(settings.copy(fontSize = size))
+    }
     private fun applyPalette(palette: TerminalPalette) {
         val properties = java.util.Properties()
         if (palette == TerminalPalette.LIGHT) {

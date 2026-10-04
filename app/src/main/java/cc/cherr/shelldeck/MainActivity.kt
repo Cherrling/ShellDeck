@@ -19,6 +19,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -35,12 +39,34 @@ import cc.cherr.shelldeck.keyboard.ExtraKeysBar
 import androidx.compose.runtime.saveable.rememberSaveable
 
 class MainActivity : ComponentActivity() {
+    internal var onTerminalFontSizeChange: ((Int) -> Unit)? = null
+    private val consumedVolumeKeys = mutableSetOf<Int>()
+
+    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+        if (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
+            val adjust = onTerminalFontSizeChange
+            if (adjust != null) {
+                consumedVolumeKeys.add(keyCode)
+                // One step per physical press: holding a key must not flood the remote PTY with resizes.
+                if (event.repeatCount == 0 && !event.isCanceled) adjust(if (keyCode == KeyEvent.KEYCODE_VOLUME_UP) 1 else -1)
+                return true
+            }
+            consumedVolumeKeys.remove(keyCode)
+        }
+        return super.onKeyDown(keyCode, event)
+    }
+
+    override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
+        if (consumedVolumeKeys.remove(keyCode)) return true
+        return super.onKeyUp(keyCode, event)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
             val model: ShellDeckModel = viewModel()
-            ShellDeckTheme(model.settings.theme, model.settings.dynamicColor) { ShellDeckApp(model) }
+            ShellDeckTheme(model.settings.theme, model.settings.dynamicColor) { ShellDeckApp(model, this@MainActivity) }
         }
     }
 }
@@ -52,7 +78,7 @@ internal fun terminalKeyboardInsets(terminalActive: Boolean): WindowInsets =
 
 @Composable
 @OptIn(ExperimentalLayoutApi::class)
-private fun ShellDeckApp(model: ShellDeckModel = viewModel()) {
+private fun ShellDeckApp(model: ShellDeckModel, activity: MainActivity) {
     var hostEditor by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<HostRecord?>(null) }
     var importing by remember { mutableStateOf(false) }
@@ -65,6 +91,13 @@ private fun ShellDeckApp(model: ShellDeckModel = viewModel()) {
     val manager = model.sessionManager
     val connection = manager.selected
     val terminal = if (showSettings) null else connection?.terminal
+    var terminalMenu by remember(connection?.id, showSettings) { mutableStateOf(false) }
+    val volumeChangesFont = terminal != null && closing == null && !switching && !terminalMenu &&
+        connection?.challenge == null && connection?.passphraseIdentity == null && model.error == null
+    DisposableEffect(activity, volumeChangesFont) {
+        activity.onTerminalFontSizeChange = if (volumeChangesFont) model::adjustFontSize else null
+        onDispose { activity.onTerminalFontSizeChange = null }
+    }
     BackHandler(terminal != null && !showSettings) {
         if (terminal?.hideKeyboardIfVisible() != true) manager.home()
     }
@@ -74,20 +107,37 @@ private fun ShellDeckApp(model: ShellDeckModel = viewModel()) {
         Column(Modifier.fillMaxSize().padding(insets).consumeWindowInsets(insets).windowInsetsPadding(keyboardInsets)) {
             if (showSettings) SettingsScreen(model) { showSettings = false }
             else if (terminal != null && connection != null) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Column(Modifier.weight(1f).padding(horizontal = 12.dp, vertical = 4.dp)) {
-                        Text(connection.host.label, style = MaterialTheme.typography.titleMedium, maxLines = 1)
-                        Text(connection.status, style = MaterialTheme.typography.labelSmall, maxLines = 2)
-                    }
-                    TextButton(onClick = { switching = true }) { Text("会话(${manager.sessions.size})") }
-                    TextButton(onClick = { terminal.leave(); showSettings = true }) { Text("设置") }
-                    TextButton(onClick = { closing = connection.id }) { Text("关闭") }
+                if (connection.status != "已连接" || connection.ended) {
+                    Text(connection.status, Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+                        style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
                 key(terminal) {
                     AndroidView(factory = terminal::createView, modifier = Modifier.weight(1f).fillMaxWidth(),
                         onRelease = terminal::releaseView, update = {})
                 }
-                ExtraKeysBar(model.settings.keyboard, terminal)
+                Row(Modifier.fillMaxWidth()) {
+                    Box(Modifier.weight(1f)) { ExtraKeysBar(model.settings.keyboard, terminal) }
+                    // Management controls share the existing two key rows, leaving the terminal full height.
+                    Column(Modifier.width(48.dp)) {
+                        Box {
+                            IconButton(onClick = { terminalMenu = true }, modifier = Modifier.size(48.dp)) {
+                                Icon(painterResource(R.drawable.ic_more_vert), contentDescription = "终端菜单")
+                            }
+                            DropdownMenu(expanded = terminalMenu, onDismissRequest = { terminalMenu = false }) {
+                                DropdownMenuItem(enabled = false, text = { Column {
+                                    Text(connection.host.label, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Text(connection.status, style = MaterialTheme.typography.labelSmall)
+                                } }, onClick = {})
+                                DropdownMenuItem(text = { Text("切换会话（${manager.sessions.size}）") }, onClick = { terminalMenu = false; switching = true })
+                                DropdownMenuItem(text = { Text("设置") }, onClick = { terminalMenu = false; terminal.leave(); showSettings = true })
+                                DropdownMenuItem(text = { Text("返回首页（保持连接）") }, onClick = { terminalMenu = false; manager.home() })
+                                DropdownMenuItem(text = { Text("关闭连接") }, onClick = { terminalMenu = false; closing = connection.id })
+                            }
+                        }
+                        TextButton(onClick = { switching = true }, modifier = Modifier.size(48.dp).semantics { contentDescription = "切换会话" },
+                            contentPadding = PaddingValues(0.dp)) { Text(manager.sessions.size.toString()) }
+                    }
+                }
             } else {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text("ShellDeck", Modifier.padding(16.dp), style = MaterialTheme.typography.headlineMedium)

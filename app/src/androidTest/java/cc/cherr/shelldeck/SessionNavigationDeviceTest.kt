@@ -21,6 +21,7 @@ class SessionNavigationDeviceTest {
         lateinit var model: ShellDeckModel
         ui.runOnUiThread { model = ViewModelProvider(ui.activity)[ShellDeckModel::class.java] }
         val pem = File(ui.activity.filesDir, "test-ssh-key").readText()
+        val originalSettings = model.settings
         var identityId: String? = null
         var hostId: String? = null
         try {
@@ -37,23 +38,48 @@ class SessionNavigationDeviceTest {
             val connection = model.sessionManager.selected!!
             ui.onNodeWithText("键盘", substring = false).performClick()
             ui.waitUntil(10000) { ViewCompat.getRootWindowInsets(ui.activity.window.decorView)?.isVisible(WindowInsetsCompat.Type.ime()) == true }
+            ui.runOnIdle { model.updateSettings(model.settings.copy(fontSize = 14)) }
+            InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(KeyEvent.KEYCODE_VOLUME_UP)
+            ui.runOnIdle {
+                assertEquals(15, model.settings.fontSize)
+                assertEquals(15, cc.cherr.shelldeck.settings.SettingsStore(ui.activity).read().fontSize)
+                // Repeated key-down from a held button does not cause repeated PTY resizes.
+                ui.activity.onKeyDown(KeyEvent.KEYCODE_VOLUME_UP, KeyEvent(0, 0, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_VOLUME_UP, 2))
+                ui.activity.onKeyUp(KeyEvent.KEYCODE_VOLUME_UP, KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_VOLUME_UP))
+                assertEquals(15, model.settings.fontSize)
+            }
+            InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(KeyEvent.KEYCODE_VOLUME_DOWN)
+            ui.runOnIdle { assertEquals(14, model.settings.fontSize); model.updateSettings(model.settings.copy(fontSize = 32)) }
+            InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(KeyEvent.KEYCODE_VOLUME_UP)
+            ui.runOnIdle { assertEquals(32, model.settings.fontSize); model.updateSettings(model.settings.copy(fontSize = 8)) }
+            InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(KeyEvent.KEYCODE_VOLUME_DOWN)
+            ui.runOnIdle { assertEquals(8, model.settings.fontSize); model.updateSettings(model.settings.copy(fontSize = 14)) }
             InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
             ui.waitUntil(10000) { ViewCompat.getRootWindowInsets(ui.activity.window.decorView)?.isVisible(WindowInsetsCompat.Type.ime()) == false }
             ui.runOnIdle { assertSame(connection, model.sessionManager.selected) }
             InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
             ui.waitUntil(5000) { model.sessionManager.selected == null }
             ui.onNodeWithText("活动会话").assertIsDisplayed()
+            ui.runOnIdle { assertNull(ui.activity.onTerminalFontSizeChange) }
             ui.activityRule.scenario.recreate()
             ui.runOnIdle { assertTrue(connection.terminal.session.isReady) }
             ui.onNodeWithText("打开", substring = false).performClick()
+            ui.onNodeWithText("Navigation test host", substring = false).assertDoesNotExist()
+            ui.onNodeWithContentDescription("终端菜单").assertIsDisplayed().performClick()
+            ui.onNodeWithText("Navigation test host", substring = false).assertIsDisplayed()
             ui.onNodeWithText("设置", substring = false).performClick()
+            ui.runOnIdle { assertNull(ui.activity.onTerminalFontSizeChange) }
+            ui.onNodeWithText("字号：14 sp").assertIsDisplayed()
             ui.onNodeWithText("返回", substring = false).performClick()
             ui.runOnIdle { assertSame(connection, model.sessionManager.selected); assertTrue(connection.terminal.session.isReady) }
-            ui.onNodeWithText("关闭", substring = false).performClick()
+            ui.onNodeWithContentDescription("切换会话").performClick()
+            ui.onNodeWithText("取消", substring = false).performClick()
+            ui.onNodeWithContentDescription("终端菜单").performClick()
+            ui.onNodeWithText("关闭连接", substring = false).performClick()
             ui.onNodeWithText("确认", substring = false).performClick()
             ui.runOnIdle { assertTrue(model.sessionManager.sessions.isEmpty()); assertTrue(connection.ended) }
         } finally {
-            ui.runOnUiThread { model.sessionManager.closeAll(); hostId?.let(model::deleteHost) }
+            ui.runOnUiThread { model.updateSettings(originalSettings); model.sessionManager.closeAll(); hostId?.let(model::deleteHost) }
             ui.waitUntil(5000) { !model.busy }
             ui.runOnUiThread { identityId?.let(model::deleteIdentity) }
             ui.waitUntil(5000) { !model.busy }

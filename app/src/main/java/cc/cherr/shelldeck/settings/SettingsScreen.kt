@@ -54,6 +54,7 @@ fun SettingsScreen(model: ShellDeckModel, onBack: () -> Unit) {
         TextButton(enabled = !model.busy, onClick = { picker.launch(arrayOf("*/*")) }) { Text("导入 TTF / OTF 字体") }
         var size by remember(settings.fontSize) { mutableFloatStateOf(settings.fontSize.toFloat()) }
         Text("字号：${size.toInt()} sp")
+        Text("终端内按音量 ＋ / − 调整字号，每次 1 sp", style = MaterialTheme.typography.bodySmall)
         Slider(size, { size = it }, valueRange = 8f..32f, steps = 23,
             onValueChangeFinished = { model.updateSettings(settings.copy(fontSize = size.toInt())) })
         Text("终端配色（独立于 App 外观）")
