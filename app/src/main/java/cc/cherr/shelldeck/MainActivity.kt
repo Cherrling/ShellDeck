@@ -200,6 +200,7 @@ private fun ShellDeckApp(model: ShellDeckModel, activity: MainActivity) {
                     if (page == MainPage.SESSIONS) {
                     if (manager.sessions.isEmpty()) item { Text("还没有会话，从服务器页面开始连接。") }
                     items(manager.sessions, key = { "session:${it.id}" }) { session ->
+                        val sessionTitle = cc.cherr.shelldeck.ui.rememberSessionTitle(session.terminal)
                         OutlinedCard(onClick = { manager.select(session.id) },
                             modifier = Modifier.fillMaxWidth().testTag("session-${session.id}")) {
                             Row(Modifier.padding(start = 12.dp, top = 8.dp, end = 4.dp, bottom = 8.dp),
@@ -210,7 +211,7 @@ private fun ShellDeckApp(model: ShellDeckModel, activity: MainActivity) {
                                     Text(when {
                                         session.challenge != null -> "等待确认服务器指纹"
                                         !session.connected -> session.status
-                                        else -> session.terminal.title.ifBlank { session.status }
+                                        else -> sessionTitle.ifBlank { session.status }
                                     }, style = MaterialTheme.typography.bodyMedium, maxLines = 1,
                                         overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                                 }

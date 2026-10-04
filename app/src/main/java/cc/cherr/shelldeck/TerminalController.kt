@@ -3,7 +3,6 @@ package cc.cherr.shelldeck
 import android.app.Application
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import android.graphics.Typeface
 import android.view.KeyEvent
@@ -14,11 +13,17 @@ import cc.cherr.shelldeck.keyboard.*
 import com.termux.view.TerminalView
 import com.termux.view.TerminalViewClient
 
-/** Only a weak UI reference; the owning ViewModel retains the session across rotation. */
+/** Only a weak UI reference; the process-owned session survives UI recreation. */
 class TerminalController(private val app: Application, private val finished: () -> Unit) : TerminalSessionClient, TerminalViewClient {
     lateinit var session: TerminalSession
     val modifiers = ModifierState()
-    var title by mutableStateOf(""); private set
+    var title: String = ""; private set
+    private val titleObservers = mutableSetOf<() -> Unit>()
+    /** Main-thread subscription used only while a session card is composed. */
+    fun observeTitle(observer: () -> Unit): () -> Unit {
+        titleObservers.add(observer)
+        return { titleObservers.remove(observer) }
+    }
     var backgroundColor by mutableIntStateOf(TerminalColors.COLOR_SCHEME.mDefaultColors[TextStyle.COLOR_INDEX_BACKGROUND]); private set
     var foregroundColor by mutableIntStateOf(TerminalColors.COLOR_SCHEME.mDefaultColors[TextStyle.COLOR_INDEX_FOREGROUND]); private set
     private var face: Typeface = Typeface.MONOSPACE
@@ -96,7 +101,11 @@ class TerminalController(private val app: Application, private val finished: () 
         terminalView?.onScreenUpdated()
     }
     override fun onTitleChanged(changedSession: TerminalSession) {
-        title = changedSession.title.orEmpty().filterNot { it.isISOControl() }.trim().take(256)
+        val next = changedSession.title.orEmpty().filterNot { it.isISOControl() }.trim().take(256)
+        if (next != title) {
+            title = next
+            titleObservers.forEach { it() }
+        }
     }
     override fun onSessionFinished(finishedSession: TerminalSession) = finished()
     override fun onCopyTextToClipboard(session: TerminalSession, text: String?) {
