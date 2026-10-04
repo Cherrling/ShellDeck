@@ -114,3 +114,9 @@ Terminal 是产品核心。优先保证终端兼容性、稳定性、低功耗�
 - 版本统一维护在 `version.properties`；发布前递增 versionCode，tag 与 versionName 严格对应。
 - Release 必须使用显式签名配置，禁止回退 debug key；详细说明见 `docs/development/releases.md`。
 - 已集成 Termux、SSHJ、Host/Identity 管理与加密密钥登录。安全设计见 docs/research/ssh-key-integration.md。上游来源与补丁见 third-party/termux/README.md；修改组件时必须更新补丁记录并运行 scripts/check_termux.py。
+
+## 日常分发约定
+
+- 用户只使用正式签名的 `cc.cherr.shelldeck`，不要再让用户安装 Dev APK。
+- main CI 通过后自动更新 rolling Release；内部 debug 构建仅用于验证。
+- 应用代码更新推送前递增 versionCode，保持同一正式签名。rolling tag 是唯一允许自动移动的发布 tag；`v*` tag 仍保持不可变。

@@ -1,5 +1,19 @@
 # 构建与发布
 
+## 日常滚动更新
+
+用户安装渠道统一为 `rolling` Release，APK 为正式签名的 `cc.cherr.shelldeck`；内部仍保留 debug variant 用于测试，但 CI 不再上传 Dev APK。
+
+main 的 CI 完成且成功后，通过 `workflow_run` 自动触发 Release。仅接受本仓库 main 的 push / workflow_dispatch，检出 CI 对应的 head SHA，构建、测试、验签后更新固定的 rolling Release。发布前检查 main 最新 SHA，旧提交重跑不会覆盖较新的代码。签名凭据继续使用既有 release Environment，publish job 才拥有 contents:write。
+
+- 固定 APK：`https://github.com/Cherrling/ShellDeck/releases/download/rolling/ShellDeck-rolling-universal.apk`
+- 每次应用代码更新在推送前递增 `version.properties` 中的 versionCode，沿用同一签名。
+- rolling tag 指向当前安装包的源码提交，允许自动更新这个固定 tag；正式版本 `v*` tag 仍不可覆盖。
+- Release 同时提供对应源码归档和 SHA256SUMS。更新安装不清除应用数据。
+- versionName 不再附加 dev / alpha；当前为 0.1.0、versionCode 6。
+- 本地 `cc.cherr.shelldeck.debug` 与正式包仍可并存，但后续不作为用户分发渠道。
+
+
 ## 一次性设置
 
 1. 在 GitHub 创建仓库，推送 main。当前项目不假定远程仓库已建立。

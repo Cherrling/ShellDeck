@@ -3,30 +3,48 @@ name: Release
 on:
   push:
     tags: ['v*']
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ github.event_name == 'workflow_run' && 'rolling' || github.ref }}
   cancel-in-progress: false
 
 jobs:
   build:
+    if: >-
+      github.event_name == 'push' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       (github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'workflow_dispatch') &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
+    outputs:
+      source_sha: ${{ steps.source.outputs.sha }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     environment: release
     env:
-      RELEASE_TAG: ${{ github.ref_name }}
+      RELEASE_TAG: ${{ github.event_name == 'workflow_run' && 'rolling' || github.ref_name }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           fetch-depth: 0
           persist-credentials: false
       - name: Validate tag and allowed source
+        id: source
         run: |
           python3 scripts/check_termux.py
-          python3 scripts/release.py validate "$RELEASE_TAG"
+          if [ "$RELEASE_TAG" = rolling ]; then
+            python3 scripts/release.py validate
+          else
+            python3 scripts/release.py validate "$RELEASE_TAG"
+          fi
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           git merge-base --is-ancestor HEAD origin/main
           if [ -n "$(git submodule status)" ]; then
             echo 'Source packaging must be extended to include submodules before publishing.' >&2
@@ -124,11 +142,38 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ github.ref_name }}
+          SOURCE_SHA: ${{ needs.build.outputs.source_sha }}
+          RELEASE_TAG: ${{ github.event_name == 'workflow_run' && 'rolling' || github.ref_name }}
         shell: bash
         run: |
+          if [ "$RELEASE_TAG" = rolling ] && [ "$(gh api "repos/$GH_REPO/git/ref/heads/main" --jq .object.sha)" != "$SOURCE_SHA" ]; then
+            echo 'A newer main commit exists; do not replace rolling with an older build.'
+            exit 0
+          fi
           cd dist
           sha256sum --check SHA256SUMS
+          if [ "$RELEASE_TAG" = rolling ]; then
+            cat > "$RUNNER_TEMP/release-notes.md" <<EOF
+          正式签名的滚动更新安装包，可覆盖安装此前的 ShellDeck 正式包。
+
+          源码提交：$SOURCE_SHA
+
+          下载 ShellDeck-rolling-universal.apk；SHA256SUMS 包含文件校验值。
+          EOF
+            if gh release view rolling >/dev/null 2>"$RUNNER_TEMP/rolling-error"; then
+              gh release upload rolling --clobber ShellDeck-rolling-universal.apk ShellDeck-rolling-source.tar.gz SHA256SUMS
+              gh api --method PATCH "repos/$GH_REPO/git/refs/tags/rolling" -f sha="$SOURCE_SHA" -F force=true
+              gh release edit rolling --latest --prerelease=false --title "ShellDeck 滚动更新" --notes-file "$RUNNER_TEMP/release-notes.md"
+            elif rg -qi 'release not found|HTTP 404' "$RUNNER_TEMP/rolling-error"; then
+              gh release create rolling --target "$SOURCE_SHA" --latest --title "ShellDeck 滚动更新" \
+                --notes-file "$RUNNER_TEMP/release-notes.md" \
+                ShellDeck-rolling-universal.apk ShellDeck-rolling-source.tar.gz SHA256SUMS
+            else
+              cat "$RUNNER_TEMP/rolling-error" >&2
+              exit 1
+            fi
+            exit 0
+          fi
           options=()
           if [[ "$RELEASE_TAG" == *-* ]]; then
             options+=(--prerelease --latest=false)

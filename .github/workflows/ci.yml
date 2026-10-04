@@ -63,9 +63,3 @@ jobs:
         with:
           path: ${{ env.ANDROID_HOME }}
           key: android-sdk-${{ runner.os }}-cli15859902-platform36-buildtools35-v2
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: ShellDeck-debug-${{ github.sha }}
-          path: app/build/outputs/apk/debug/*.apk
-          if-no-files-found: error
-          retention-days: 14
