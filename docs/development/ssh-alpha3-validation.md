@@ -27,4 +27,8 @@ CI 包含真实 sshd 测试；启用时应用测试强制执行，不从 Gradle 
 
 首次完整云端 CI 已通过：[run 37228935866](https://github.com/Cherrling/ShellDeck/actions/runs/37228935866)，对应 commit 0232745。冷构建 job 用时 5 分 8 秒，包含 SDK 初始化、真实 SSH 集成测试、lint、APK 构建、缓存写入与 Artifact 上传。不是本地结果代替云端结果。
 
-后续设备测试提交不改变生产代码。签名自动发布需官方 gh 登录后配置仓库 Secrets；旧的本机 gh 包装器曾注入权限不足的 PAT，已按用户要求移除。
+暖缓存 CI [run 37229427983](https://github.com/Cherrling/ShellDeck/actions/runs/37229427983) 通过，总耗时 1 分 45 秒（首次冷构建总耗时 5 分 11 秒），日志确认 Gradle 任务命中 FROM-CACHE。真实 SSH 应用测试仍强制执行。
+
+用户授权后，已通过官方 gh 配置固定 APK 签名 Secrets。标签 v0.1.0-alpha.3 触发的 [Release run 37229853181](https://github.com/Cherrling/ShellDeck/actions/runs/37229853181) 成功，完成测试、签名构建、证书检查和发布。旧的本机 gh 包装器已按用户要求移除。
+
+[公开 Release](https://github.com/Cherrling/ShellDeck/releases/tag/v0.1.0-alpha.3) 包含 APK、对应源码和 SHA256SUMS。云端 APK SHA256 为 `2134e5714271ecdb6c8c102bb60975e4de0cc9729abac47f8a8ba7cf689fa7ba`，与上面本地构建产物分别记录；两者使用同一发布签名证书。
