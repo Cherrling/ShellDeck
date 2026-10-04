@@ -1,0 +1,30 @@
+package cc.cherr.shelldeck.ssh
+
+import net.schmizz.sshj.transport.verification.HostKeyVerifier
+import java.security.PublicKey
+
+data class HostPin(val algorithm: String, val fingerprint: String)
+data class HostChallenge(val hostname: String, val port: Int, val presented: HostPin, val previous: HostPin?)
+enum class TrustDecision { CANCEL, ONCE, SAVE }
+
+/** The endpoint is the user's requested host, never reverse DNS or a server-supplied name. */
+class HostTrust(
+    private val hostname: String,
+    private val port: Int,
+    private val read: () -> HostPin?,
+    private val save: (HostPin) -> Unit,
+    private val ask: (HostChallenge) -> TrustDecision,
+) : HostKeyVerifier {
+    override fun findExistingAlgorithms(hostname: String, port: Int): List<String> =
+        read()?.let { listOf(it.algorithm) } ?: emptyList()
+    override fun verify(hostname: String, port: Int, key: PublicKey): Boolean {
+        val presented = HostPin(SshKeys.algorithm(key), SshKeys.fingerprint(key))
+        val previous = read()
+        if (presented == previous) return true
+        return when (ask(HostChallenge(this.hostname, this.port, presented, previous))) {
+            TrustDecision.CANCEL -> false
+            TrustDecision.ONCE -> true
+            TrustDecision.SAVE -> { save(presented); true }
+        }
+    }
+}

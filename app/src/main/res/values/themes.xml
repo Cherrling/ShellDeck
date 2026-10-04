@@ -1,0 +1,8 @@
+<resources>
+    <style name="Theme.ShellDeck" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowBackground">#F6FBF7</item>
+    </style>
+    <color name="launcher_background">#163C32</color>
+</resources>

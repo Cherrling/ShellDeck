@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<lint>
+    <!-- BC's optional EST JcaJceUtils.getTrustAllTrustManager helper is bundled in bcpkix.
+         ShellDeck does not use EST/TLS or this helper. Keep the detector enabled for all app code
+         and other dependencies; this exception must be reviewed on a BC version change. -->
+    <issue id="TrustAllX509TrustManager">
+        <ignore path="**/bcpkix-jdk18on-1.86.jar" />
+    </issue>
+</lint>
