@@ -8,6 +8,9 @@ public interface StoreDao {
     @Query("SELECT * FROM hosts ORDER BY label COLLATE NOCASE") List<HostRecord> hosts();
     @Query("SELECT * FROM identities ORDER BY label COLLATE NOCASE") List<IdentityRecord> identities();
     @Query("SELECT * FROM identities WHERE id = :id") IdentityRecord identity(String id);
+    @Query("SELECT * FROM hosts WHERE id = :id") HostRecord host(String id);
+    @Query("UPDATE hosts SET favorite = NOT favorite WHERE id = :id") void toggleFavorite(String id);
+    @Query("UPDATE hosts SET lastUsedAt = MAX(lastUsedAt, :timestamp) WHERE id = :id") void markUsed(String id, long timestamp);
     @Upsert void saveHost(HostRecord host);
     @Insert void insertIdentity(IdentityRecord identity);
     @Query("DELETE FROM hosts WHERE id = :id") void deleteHost(String id);

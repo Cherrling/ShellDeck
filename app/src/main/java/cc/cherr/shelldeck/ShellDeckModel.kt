@@ -109,12 +109,28 @@ class ShellDeckModel(application: Application) : AndroidViewModel(application) {
             error = "请填写有效的服务器地址、端口（1–65535）和用户名"; return false
         }
         operation("服务器保存失败") {
-            dao.saveHost(HostRecord().apply {
+            val record = if (id == null) HostRecord() else requireNotNull(dao.host(id))
+            dao.saveHost(record.apply {
                 this.id = id ?: UUID.randomUUID().toString(); this.label = label.trim().ifBlank { host }
                 this.hostname = host; this.port = number; this.username = username.trim(); this.identityId = identityId
             })
         }
         return true
+    }
+    fun toggleFavorite(id: String) = operation("收藏更新失败") { dao.toggleFavorite(id) }
+    fun duplicateHost(id: String) = operation("复制服务器失败") {
+        val original = requireNotNull(dao.host(id))
+        dao.saveHost(HostRecord().apply {
+            this.id = UUID.randomUUID().toString(); label = "${original.label}（副本）"
+            hostname = original.hostname; port = original.port; username = original.username; identityId = original.identityId
+        })
+    }
+    private fun markUsed(host: HostRecord) {
+        val timestamp = System.currentTimeMillis()
+        worker.execute {
+            try { dao.markUsed(host.id, timestamp); reload() }
+            catch (_: Exception) { post { error = "最近连接记录保存失败，当前连接不受影响" } }
+        }
     }
     fun deleteHost(id: String) = operation("删除服务器失败") { dao.deleteHost(id) }
     fun deleteIdentity(id: String) {
@@ -153,13 +169,17 @@ class ShellDeckModel(application: Application) : AndroidViewModel(application) {
         }
     }
     fun connect(host: HostRecord, secret: String) {
-        sessionManager.connect(host, secret)
+        val before = sessionManager.sessions.size
+        val connection = sessionManager.connect(host, secret)
+        if (sessionManager.sessions.size > before) markUsed(connection.host)
         runtime.userRequestedConnection()
         sessionManager.selected?.terminal?.appearance(typeface, settings.fontSize)
     }
     fun reconnect(id: String, secret: String) {
         val old = sessionManager.sessions.firstOrNull { it.id == id } ?: return
+        val before = sessionManager.sessions.size
         val connection = sessionManager.reconnect(id, secret, hosts.firstOrNull { it.id == old.host.id }) ?: return
+        if (sessionManager.sessions.size > before) markUsed(connection.host)
         runtime.userRequestedConnection()
         connection.terminal.appearance(typeface, settings.fontSize)
     }

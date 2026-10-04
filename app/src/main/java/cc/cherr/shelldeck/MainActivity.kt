@@ -33,6 +33,8 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.SecureFlagPolicy
 import androidx.lifecycle.viewmodel.compose.viewModel
+import cc.cherr.shelldeck.data.HostFilter
+import cc.cherr.shelldeck.data.browseHosts
 import cc.cherr.shelldeck.data.HostRecord
 import cc.cherr.shelldeck.data.IdentityRecord
 import cc.cherr.shelldeck.ssh.TrustDecision
@@ -95,6 +97,10 @@ internal fun terminalKeyboardInsets(terminalActive: Boolean): WindowInsets =
 @Composable
 @OptIn(ExperimentalLayoutApi::class)
 private fun ShellDeckApp(model: ShellDeckModel, activity: MainActivity) {
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+    var hostQuery by rememberSaveable { mutableStateOf("") }
+    var hostFilter by rememberSaveable { mutableStateOf(HostFilter.ALL) }
+    val visibleHosts = remember(model.hosts, hostQuery, hostFilter) { browseHosts(model.hosts, hostQuery, hostFilter) }
     var hostEditor by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<HostRecord?>(null) }
     var importing by remember { mutableStateOf(false) }
@@ -175,6 +181,19 @@ private fun ShellDeckApp(model: ShellDeckModel, activity: MainActivity) {
                     Text(if (showIdentities) "SSH 身份与密钥" else if (page == MainPage.SESSIONS) "活动会话" else page.label,
                         Modifier.padding(16.dp), style = if (showIdentities) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineMedium)
                 }
+                if (page == MainPage.HOSTS && !showIdentities) {
+                    OutlinedTextField(hostQuery, { hostQuery = it }, singleLine = true,
+                        keyboardOptions = KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Search),
+                        keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = { focusManager.clearFocus() }),
+                        label = { Text("搜索名称、地址或用户名") },
+                        trailingIcon = { if (hostQuery.isNotEmpty()) IconButton(onClick = { hostQuery = "" }) {
+                            Icon(painterResource(R.drawable.ic_close), contentDescription = "清空搜索")
+                        } }, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).testTag("host-search"))
+                    Row(Modifier.padding(horizontal = 16.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        HostFilter.entries.forEach { filter -> FilterChip(hostFilter == filter, { hostFilter = filter },
+                            label = { Text(filter.label) }, modifier = Modifier.testTag("host-filter-${filter.name}")) }
+                    }
+                }
                 if (model.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
                 LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp,
                     bottom = if (page == MainPage.HOSTS || showIdentities) 96.dp else 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -206,7 +225,10 @@ private fun ShellDeckApp(model: ShellDeckModel, activity: MainActivity) {
                     if (model.hosts.isEmpty()) item {
                         Text("添加常用服务器，点击卡片即可连接。私钥可在设置中的「SSH 身份与密钥」导入。")
                     }
-                    items(model.hosts, key = { it.id }) { host ->
+                    if (model.hosts.isNotEmpty() && visibleHosts.isEmpty()) item {
+                        Text(if (hostQuery.isNotBlank()) "没有匹配的服务器" else if (hostFilter == HostFilter.FAVORITES) "点击服务器旁的星标即可收藏。" else "还没有最近连接记录。")
+                    }
+                    items(visibleHosts, key = { it.id }) { host ->
                         var hostMenu by remember(host.id) { mutableStateOf(false) }
                         Card(onClick = { if (host.identityId == null) { reconnectingId = null; login = host } else model.connect(host, "") },
                             enabled = !model.busy, modifier = Modifier.fillMaxWidth().testTag("host-${host.id}")) {
@@ -216,10 +238,16 @@ private fun ShellDeckApp(model: ShellDeckModel, activity: MainActivity) {
                                     Text("${host.username}@${host.hostname}:${host.port}")
                                     Text(model.identities.firstOrNull { it.id == host.identityId }?.label ?: "密码登录", style = MaterialTheme.typography.bodySmall)
                                 }
+                                IconButton(onClick = { model.toggleFavorite(host.id) }, enabled = !model.busy,
+                                    modifier = Modifier.testTag("favorite-${host.id}")) {
+                                    Icon(painterResource(if (host.favorite) R.drawable.ic_star else R.drawable.ic_star_outline),
+                                        contentDescription = if (host.favorite) "取消收藏 ${host.label}" else "收藏 ${host.label}")
+                                }
                                 Box {
                                     IconButton(onClick = { hostMenu = true }) { Icon(painterResource(R.drawable.ic_more_vert), contentDescription = "${host.label} 的更多操作") }
                                     DropdownMenu(expanded = hostMenu, onDismissRequest = { hostMenu = false }) {
                                         DropdownMenuItem(text = { Text("编辑服务器") }, enabled = !model.busy, onClick = { hostMenu = false; editing = host; hostEditor = true })
+                                        DropdownMenuItem(text = { Text("复制服务器") }, enabled = !model.busy, onClick = { hostMenu = false; model.duplicateHost(host.id) })
                                         DropdownMenuItem(text = { Text("删除服务器") }, enabled = !model.busy, onClick = { hostMenu = false; deletingHost = host })
                                     }
                                 }
