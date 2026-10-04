@@ -164,7 +164,7 @@ jobs:
               gh release upload rolling --clobber ShellDeck-rolling-universal.apk ShellDeck-rolling-source.tar.gz SHA256SUMS
               gh api --method PATCH "repos/$GH_REPO/git/refs/tags/rolling" -f sha="$SOURCE_SHA" -F force=true
               gh release edit rolling --latest --prerelease=false --title "ShellDeck 滚动更新" --notes-file "$RUNNER_TEMP/release-notes.md"
-            elif rg -qi 'release not found|HTTP 404' "$RUNNER_TEMP/rolling-error"; then
+            elif grep -Eqi 'release not found|HTTP 404' "$RUNNER_TEMP/rolling-error"; then
               gh release create rolling --target "$SOURCE_SHA" --latest --title "ShellDeck 滚动更新" \
                 --notes-file "$RUNNER_TEMP/release-notes.md" \
                 ShellDeck-rolling-universal.apk ShellDeck-rolling-source.tar.gz SHA256SUMS
