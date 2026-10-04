@@ -1,0 +1,52 @@
+package cc.cherr.shelldeck.keyboard
+
+import android.view.KeyEvent
+
+enum class ModifierKey { CTRL, ALT, SHIFT }
+enum class SpecialKey(val code: Int) {
+    ESC(KeyEvent.KEYCODE_ESCAPE), TAB(KeyEvent.KEYCODE_TAB), ENTER(KeyEvent.KEYCODE_ENTER),
+    BACKSPACE(KeyEvent.KEYCODE_DEL), UP(KeyEvent.KEYCODE_DPAD_UP), DOWN(KeyEvent.KEYCODE_DPAD_DOWN),
+    LEFT(KeyEvent.KEYCODE_DPAD_LEFT), RIGHT(KeyEvent.KEYCODE_DPAD_RIGHT),
+    HOME(KeyEvent.KEYCODE_MOVE_HOME), END(KeyEvent.KEYCODE_MOVE_END),
+    PAGE_UP(KeyEvent.KEYCODE_PAGE_UP), PAGE_DOWN(KeyEvent.KEYCODE_PAGE_DOWN),
+    DELETE(KeyEvent.KEYCODE_FORWARD_DEL), F1(KeyEvent.KEYCODE_F1), F2(KeyEvent.KEYCODE_F2),
+    F3(KeyEvent.KEYCODE_F3), F4(KeyEvent.KEYCODE_F4), F5(KeyEvent.KEYCODE_F5), F6(KeyEvent.KEYCODE_F6),
+    F7(KeyEvent.KEYCODE_F7), F8(KeyEvent.KEYCODE_F8), F9(KeyEvent.KEYCODE_F9), F10(KeyEvent.KEYCODE_F10),
+    F11(KeyEvent.KEYCODE_F11), F12(KeyEvent.KEYCODE_F12)
+}
+sealed interface KeyAction {
+    data class Character(val text: String) : KeyAction
+    data class Special(val key: SpecialKey, val modifiers: Set<ModifierKey> = emptySet()) : KeyAction
+    data class Modifier(val key: ModifierKey) : KeyAction
+    data class EscapeSequence(val sequence: String) : KeyAction
+    data class Macro(val text: String) : KeyAction
+    data object ToggleKeyboard : KeyAction
+}
+data class KeySlot(val label: String, val action: KeyAction, val width: Int = 1)
+data class KeyboardProfile(val rows: List<List<KeySlot>>) {
+    fun validate() {
+        require(rows.size == 2 && rows.all { it.size in 1..32 })
+        rows.flatten().forEach {
+            require(it.label.isNotBlank() && it.label.length <= 24 && it.width in 1..3)
+            val text = when (val action = it.action) {
+                is KeyAction.Character -> action.text
+                is KeyAction.EscapeSequence -> action.sequence
+                is KeyAction.Macro -> action.text
+                else -> null
+            }
+            if (text != null) require(text.isNotEmpty() && text.length <= 4096)
+            if (it.action is KeyAction.Character) require(it.action.text.codePointCount(0, it.action.text.length) == 1 && it.action.text.codePointAt(0) !in 0xD800..0xDFFF)
+        }
+    }
+    companion object {
+        fun default() = KeyboardProfile(listOf(
+            listOf(KeySlot("键盘", KeyAction.ToggleKeyboard), KeySlot("ESC", KeyAction.Special(SpecialKey.ESC)),
+                KeySlot("CTRL", KeyAction.Modifier(ModifierKey.CTRL)), KeySlot("ALT", KeyAction.Modifier(ModifierKey.ALT)),
+                KeySlot("SHIFT", KeyAction.Modifier(ModifierKey.SHIFT)), KeySlot("TAB", KeyAction.Special(SpecialKey.TAB)),
+                KeySlot("HOME", KeyAction.Special(SpecialKey.HOME)), KeySlot("END", KeyAction.Special(SpecialKey.END))),
+            listOf(KeySlot("'", KeyAction.Character("'")), KeySlot("\"", KeyAction.Character("\"")),
+                KeySlot("%", KeyAction.Character("%")), KeySlot("[", KeyAction.Character("[")),
+                KeySlot("←", KeyAction.Special(SpecialKey.LEFT)), KeySlot("↓", KeyAction.Special(SpecialKey.DOWN)),
+                KeySlot("↑", KeyAction.Special(SpecialKey.UP)), KeySlot("→", KeyAction.Special(SpecialKey.RIGHT)))))
+    }
+}

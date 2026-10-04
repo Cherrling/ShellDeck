@@ -5,36 +5,62 @@ import android.graphics.Typeface
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.inputmethod.InputMethodManager
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import com.termux.terminal.*
+import cc.cherr.shelldeck.keyboard.*
 import com.termux.view.TerminalView
 import com.termux.view.TerminalViewClient
 
 /** Only a weak UI reference; the owning ViewModel retains the session across rotation. */
 class TerminalController(private val app: Application, private val finished: () -> Unit) : TerminalSessionClient, TerminalViewClient {
     lateinit var session: TerminalSession
-    var ctrl by mutableStateOf(false)
-    var alt by mutableStateOf(false)
-    fun special(keyCode: Int) {
+    val modifiers = ModifierState()
+    private var face: Typeface = Typeface.MONOSPACE
+    private var fontSize = 14
+    fun appearance(typeface: Typeface, size: Int) {
+        val fontChanged = face !== typeface
+        val sizeChanged = fontSize != size
+        face = typeface; fontSize = size
+        terminalView?.let {
+            if (fontChanged) it.setTypeface(typeface)
+            if (sizeChanged) it.setTextSize(android.util.TypedValue.applyDimension(android.util.TypedValue.COMPLEX_UNIT_SP, size.toFloat(), it.resources.displayMetrics).toInt())
+        }
+    }
+    fun special(keyCode: Int, extra: Set<ModifierKey> = emptySet()) {
         if (!session.isReady) return
-        terminalView?.handleKeyCode(keyCode, (if (ctrl) KeyHandler.KEYMOD_CTRL else 0) or (if (alt) KeyHandler.KEYMOD_ALT else 0))
-        ctrl = false; alt = false
+        fun active(key: ModifierKey) = key in extra || modifiers.active(key)
+        val flags = (if (active(ModifierKey.CTRL)) KeyHandler.KEYMOD_CTRL else 0) or
+            (if (active(ModifierKey.ALT)) KeyHandler.KEYMOD_ALT else 0) or
+            (if (active(ModifierKey.SHIFT)) KeyHandler.KEYMOD_SHIFT else 0)
+        if (terminalView?.handleKeyCode(keyCode, flags) == true) modifiers.consumed()
+    }
+    fun perform(action: KeyAction) {
+        if (action == KeyAction.ToggleKeyboard) { toggleKeyboard(); return }
+        if (!session.isReady) return
+        when (action) {
+            is KeyAction.Character -> action.text.codePoints().forEach { cp ->
+                val code = if (modifiers.active(ModifierKey.SHIFT)) Character.toUpperCase(cp) else cp
+                terminalView?.inputCodePoint(-1, code, false, false)
+            }
+            is KeyAction.Special -> special(action.key.code, action.modifiers)
+            is KeyAction.EscapeSequence -> { session.write(action.sequence); modifiers.consumed() }
+            is KeyAction.Macro -> { session.write(action.text); modifiers.consumed() }
+            else -> Unit
+        }
     }
     private var viewReference = java.lang.ref.WeakReference<TerminalView>(null)
     private val terminalView: TerminalView? get() = viewReference.get()
     fun createView(context: android.content.Context): TerminalView = TerminalView(context, null).also {
         viewReference = java.lang.ref.WeakReference(it)
         it.setTerminalViewClient(this)
-        it.setTextSize(android.util.TypedValue.applyDimension(android.util.TypedValue.COMPLEX_UNIT_SP, 14f, context.resources.displayMetrics).toInt())
-        it.setTypeface(Typeface.MONOSPACE)
-        it.setBackgroundColor(android.graphics.Color.BLACK)
+        it.setTextSize(android.util.TypedValue.applyDimension(android.util.TypedValue.COMPLEX_UNIT_SP, fontSize.toFloat(), context.resources.displayMetrics).toInt())
+        it.setTypeface(face)
+        it.setBackgroundColor(TerminalColors.COLOR_SCHEME.mDefaultColors[TextStyle.COLOR_INDEX_BACKGROUND])
         it.isFocusableInTouchMode = true
         it.attachSession(session)
         it.requestFocus()
     }
     fun releaseView(view: TerminalView) {
+        modifiers.clear()
         view.setTerminalCursorBlinkerState(false, false)
         view.stopTextSelectionMode()
         if (terminalView === view) viewReference.clear()
@@ -43,7 +69,22 @@ class TerminalController(private val app: Application, private val finished: () 
         it.requestFocus()
         it.context.getSystemService(InputMethodManager::class.java).showSoftInput(it, InputMethodManager.SHOW_IMPLICIT)
     } }
-    fun close() { session.finishIfRunning(); viewReference.clear() }
+    fun hideKeyboardIfVisible(): Boolean {
+        val view = terminalView ?: return false
+        if (androidx.core.view.ViewCompat.getRootWindowInsets(view)?.isVisible(androidx.core.view.WindowInsetsCompat.Type.ime()) != true) return false
+        androidx.core.view.ViewCompat.getWindowInsetsController(view)?.hide(androidx.core.view.WindowInsetsCompat.Type.ime())
+        return true
+    }
+    fun toggleKeyboard() { terminalView?.let {
+        val controller = androidx.core.view.ViewCompat.getWindowInsetsController(it)
+        if (androidx.core.view.ViewCompat.getRootWindowInsets(it)?.isVisible(androidx.core.view.WindowInsetsCompat.Type.ime()) == true)
+            controller?.hide(androidx.core.view.WindowInsetsCompat.Type.ime()) else showKeyboard()
+    } }
+    fun leave() { modifiers.clear(); terminalView?.let {
+        androidx.core.view.ViewCompat.getWindowInsetsController(it)?.hide(androidx.core.view.WindowInsetsCompat.Type.ime())
+    } }
+    fun colorsChanged() { session.emulator?.mColors?.reset(); onColorsChanged(session) }
+    fun close() { modifiers.clear(); session.finishIfRunning(); viewReference.clear() }
     override fun onTextChanged(changedSession: TerminalSession) {
         terminalView?.onScreenUpdated()
     }
@@ -59,7 +100,10 @@ class TerminalController(private val app: Application, private val finished: () 
         }
     }
     override fun onBell(session: TerminalSession) = Unit
-    override fun onColorsChanged(session: TerminalSession) { terminalView?.invalidate() }
+    override fun onColorsChanged(session: TerminalSession) { terminalView?.let { view ->
+        session.emulator?.mColors?.mCurrentColors?.get(TextStyle.COLOR_INDEX_BACKGROUND)?.let(view::setBackgroundColor)
+        view.invalidate()
+    } }
     override fun onTerminalCursorStateChange(state: Boolean) = Unit
     override fun setTerminalShellPid(session: TerminalSession, pid: Int) = Unit
     override fun getTerminalCursorStyle(): Int = 0
@@ -71,14 +115,28 @@ class TerminalController(private val app: Application, private val finished: () 
     // Upstream's false branch requests TYPE_CLASS_TEXT, enabling composing IMEs (e.g. Chinese).
     override fun isTerminalViewSelected() = false
     override fun copyModeChanged(copyMode: Boolean) = Unit
-    override fun onKeyDown(keyCode: Int, e: KeyEvent?, session: TerminalSession?) = false
+    override fun onKeyDown(keyCode: Int, e: KeyEvent?, session: TerminalSession?): Boolean {
+        if (e == null || session?.isReady != true || e.isSystem || e.isFunctionPressed || KeyEvent.isModifierKey(keyCode)) return false
+        val flags = (if (e.isCtrlPressed || modifiers.active(ModifierKey.CTRL)) KeyHandler.KEYMOD_CTRL else 0) or
+            (if (e.isAltPressed || modifiers.active(ModifierKey.ALT)) KeyHandler.KEYMOD_ALT else 0) or
+            (if (e.isShiftPressed || modifiers.active(ModifierKey.SHIFT)) KeyHandler.KEYMOD_SHIFT else 0) or
+            (if (e.isNumLockOn) KeyHandler.KEYMOD_NUM_LOCK else 0)
+        val emulator = session.emulator ?: return false
+        if (KeyHandler.getCode(keyCode, flags, emulator.isCursorKeysApplicationMode, emulator.isKeypadApplicationMode) == null) return false
+        return terminalView?.handleKeyCode(keyCode, flags)?.also { if (it) modifiers.consumed() } ?: false
+    }
     override fun onKeyUp(keyCode: Int, e: KeyEvent?) = false
     override fun onLongPress(event: MotionEvent?) = false
-    override fun readControlKey(): Boolean = ctrl.also { ctrl = false }
-    override fun readAltKey(): Boolean = alt.also { alt = false }
-    override fun readShiftKey() = false
+    override fun readControlKey() = modifiers.active(ModifierKey.CTRL)
+    override fun readAltKey() = modifiers.active(ModifierKey.ALT)
+    override fun readShiftKey() = modifiers.active(ModifierKey.SHIFT)
     override fun readFnKey() = false
-    override fun onCodePoint(codePoint: Int, ctrlDown: Boolean, session: TerminalSession?) = false
+    override fun onCodePoint(codePoint: Int, ctrlDown: Boolean, session: TerminalSession?): Boolean {
+        if (session?.isReady != true) return true
+        // TerminalView has already captured Ctrl/Alt and transformed Shift before this callback.
+        modifiers.consumed()
+        return false
+    }
     override fun onEmulatorSet() { terminalView?.setTerminalCursorBlinkerState(false, false) }
     // Do not log terminal contents or keystrokes.
     override fun logError(tag: String?, message: String?) = Unit

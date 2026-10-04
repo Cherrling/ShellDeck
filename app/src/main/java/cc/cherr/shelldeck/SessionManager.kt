@@ -1,0 +1,108 @@
+package cc.cherr.shelldeck
+
+import android.app.Application
+import android.os.Handler
+import android.os.Looper
+import androidx.compose.runtime.*
+import cc.cherr.shelldeck.data.*
+import cc.cherr.shelldeck.ssh.*
+import com.termux.terminal.TerminalSession
+import java.util.UUID
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.TimeUnit
+
+/** Root-screen lifetime, independent of which terminal View is attached. Not a background service. */
+class SessionManager(private val application: Application, private val dao: StoreDao, private val vault: CredentialVault) {
+    val sessions = mutableStateListOf<SessionConnection>()
+    var selectedId by mutableStateOf<String?>(null); private set
+    val selected get() = sessions.firstOrNull { it.id == selectedId }
+    fun connect(host: HostRecord, secret: String) {
+        selected?.terminal?.leave()
+        val connection = SessionConnection(application, host, dao, vault, secret)
+        sessions.add(connection); selectedId = connection.id
+    }
+    fun select(id: String) { require(sessions.any { it.id == id }); selected?.terminal?.leave(); selectedId = id }
+    fun home() { selected?.terminal?.leave(); selectedId = null }
+    fun close(id: String) {
+        val connection = sessions.firstOrNull { it.id == id } ?: return
+        if (selectedId == id) home()
+        connection.close(); sessions.remove(connection)
+    }
+    fun closeAll() { sessions.toList().forEach { close(it.id) } }
+}
+
+class SessionConnection(application: Application, val host: HostRecord, dao: StoreDao, vault: CredentialVault, secret: String) {
+    val id: String = UUID.randomUUID().toString()
+    private val main = Handler(Looper.getMainLooper())
+    private var disposed = false
+    var ended by mutableStateOf(false); private set
+    var status by mutableStateOf("准备连接…"); private set
+    var challenge by mutableStateOf<HostChallenge?>(null); private set
+    var passphraseIdentity by mutableStateOf<String?>(null); private set
+    private var pendingTrust: CompletableFuture<TrustDecision>? = null
+    private var pendingPassphrase: CompletableFuture<CharArray?>? = null
+    private val password = secret.toCharArray()
+    val terminal = TerminalController(application) { finish() }
+    init {
+        val verifier = HostTrust(host.hostname, host.port,
+            read = { dao.knownHost(host.hostname, host.port)?.let { HostPin(it.algorithm, it.fingerprint) } },
+            save = { pin -> dao.saveKnownHost(KnownHostRecord().apply {
+                hostname = host.hostname; port = host.port; algorithm = pin.algorithm; fingerprint = pin.fingerprint
+            }) },
+            ask = { request ->
+                val future = CompletableFuture<TrustDecision>()
+                main.post {
+                    if (disposed || ended || future.isDone) future.complete(TrustDecision.CANCEL)
+                    else { pendingTrust = future; challenge = request }
+                }
+                try { future.get(90, TimeUnit.SECONDS) }
+                catch (_: Exception) { TrustDecision.CANCEL }
+                finally {
+                    future.complete(TrustDecision.CANCEL)
+                    main.post { if (pendingTrust === future) { pendingTrust = null; challenge = null } }
+                }
+            })
+        val transport = SshTransport(host.hostname, host.port, host.username, verifier,
+            authenticate = { client ->
+                try {
+                    val identityId = host.identityId
+                    if (identityId == null) client.authPassword(host.username, password)
+                    else {
+                        val identity = requireNotNull(dao.identity(identityId))
+                        val bytes = vault.decrypt(identity.id, identity.encryptedKey)
+                        try {
+                            val key = SshKeys.loadWithPassphraseRequest(client, bytes) {
+                                val future = CompletableFuture<CharArray?>()
+                                main.post {
+                                    if (disposed || ended || future.isDone) future.complete(null)
+                                    else { pendingPassphrase = future; passphraseIdentity = identity.label; status = "等待私钥口令…" }
+                                }
+                                try { future.get(90, TimeUnit.SECONDS) }
+                                catch (_: Exception) { future.complete(null); future.getNow(null)?.fill('\u0000'); null }
+                                finally {
+                                    future.complete(null)
+                                    main.post { if (pendingPassphrase === future) { pendingPassphrase = null; passphraseIdentity = null } }
+                                }
+                            }
+                            client.authPublickey(host.username, key)
+                        } finally { bytes.fill(0) }
+                    }
+                } finally { password.fill('\u0000') }
+            }, status = { message -> main.post { if (!disposed) status = message } })
+        terminal.session = TerminalSession(transport, 5000, terminal)
+        // Start independently of composition; a quick navigation must not leave an unstarted connection.
+        terminal.session.updateSize(80, 24, 8, 16)
+    }
+    fun trust(decision: TrustDecision) { pendingTrust?.complete(decision); challenge = null }
+    fun submitPassphrase(secret: String) {
+        val chars = secret.toCharArray()
+        if (pendingPassphrase?.complete(chars) != true) chars.fill('\u0000')
+        passphraseIdentity = null
+    }
+    private fun finish() {
+        ended = true; password.fill('\u0000')
+        pendingTrust?.complete(TrustDecision.CANCEL); pendingTrust = null; challenge = null
+        pendingPassphrase?.complete(null); pendingPassphrase = null; passphraseIdentity = null
+    }
+    fun close() { disposed = true; finish(); terminal.close() }
+}

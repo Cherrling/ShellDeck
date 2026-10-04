@@ -1,5 +1,15 @@
 # 第三方声明
 
+## Maple Mono NF CN
+
+- 字体：Maple Mono NF CN Regular；文件内版本标识 `Version 7.900`。
+- 路径：`app/src/main/res/font/maple_mono_nf_cn_regular.ttf`。
+- 用户提供的 TTF 原样保留，仅重命名为 Android 资源名称；未裁剪字形或修改字体内容。
+- SHA-256：`68ef48dab5cb7cdd610b7c67905fd289f8ea41f9d2302a6a959c1bd9effa5c7b`。
+- Copyright 2022 The Maple Mono Project Authors；[上游项目](https://github.com/subframe7536/maple-font)。
+- 字体独立采用 SIL Open Font License 1.1；[版权和许可证全文](app/src/main/assets/licenses/maple_mono/OFL.txt) 来自 [上游 v7.9](https://github.com/subframe7536/maple-font/blob/v7.9/OFL.txt)，放在 assets 中随 APK 分发。
+- 终端默认采用这款内置字体；设置页可切换系统等宽字体或导入字体。
+
 ## Gradle Wrapper
 
 `gradlew`、`gradlew.bat` 与 `gradle/wrapper/gradle-wrapper.jar` 来自

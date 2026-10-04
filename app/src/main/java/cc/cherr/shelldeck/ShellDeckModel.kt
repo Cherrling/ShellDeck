@@ -11,13 +11,13 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.room.Room
 import cc.cherr.shelldeck.data.*
 import cc.cherr.shelldeck.ssh.*
-import com.termux.terminal.TerminalSession
+import cc.cherr.shelldeck.settings.*
+import android.graphics.Typeface
+import com.termux.terminal.TerminalColors
 import net.schmizz.sshj.SSHClient
 import java.util.Locale
 import java.util.UUID
-import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executors
-import java.util.concurrent.TimeUnit
 
 class ShellDeckModel(application: Application) : AndroidViewModel(application) {
     private val main = Handler(Looper.getMainLooper())
@@ -26,20 +26,61 @@ class ShellDeckModel(application: Application) : AndroidViewModel(application) {
     private val dao = database.records()
     private val vault = CredentialVault()
     @Volatile private var cleared = false
-    private var generation = 0L
-    @Volatile private var pendingTrust: CompletableFuture<TrustDecision>? = null
-    @Volatile private var pendingPassphrase: CompletableFuture<CharArray?>? = null
-    private var loginSecret: CharArray? = null
+    val sessionManager = SessionManager(application, dao, vault)
+    private val settingsStore = SettingsStore(application)
+    private val fontStore = FontStore(application)
+    var settings by mutableStateOf(settingsStore.read()); private set
+    var fonts by mutableStateOf<List<FontEntry>>(emptyList()); private set
+    var typeface by mutableStateOf(Typeface.MONOSPACE); private set
+    var fontBusy by mutableStateOf(false); private set
+    private var fontRequest = 0L
     var hosts by mutableStateOf<List<HostRecord>>(emptyList()); private set
     var identities by mutableStateOf<List<IdentityRecord>>(emptyList()); private set
     var busy by mutableStateOf(false); private set
     var error by mutableStateOf<String?>(null); private set
-    var terminal by mutableStateOf<TerminalController?>(null); private set
-    var activeHost by mutableStateOf<HostRecord?>(null); private set
-    var connectionStatus by mutableStateOf(""); private set
-    var challenge by mutableStateOf<HostChallenge?>(null); private set
-    var passphraseIdentity by mutableStateOf<String?>(null); private set
-    init { refresh() }
+    init { refresh(); reloadFonts(); applyPalette(settings.palette) }
+    fun updateSettings(value: AppSettings) {
+        settingsStore.save(value)
+        val old = settings; settings = value
+        if (old.palette != value.palette) applyPalette(value.palette)
+        if (old.fontId != value.fontId) reloadFonts()
+        sessionManager.sessions.forEach { it.terminal.appearance(typeface, value.fontSize) }
+    }
+    private fun applyPalette(palette: TerminalPalette) {
+        val properties = java.util.Properties()
+        if (palette == TerminalPalette.LIGHT) {
+            properties.setProperty("foreground", "#202020"); properties.setProperty("background", "#ffffff")
+            properties.setProperty("cursor", "#202020")
+        }
+        TerminalColors.COLOR_SCHEME.updateWith(properties)
+        sessionManager.sessions.forEach { it.terminal.colorsChanged() }
+    }
+    private fun reloadFonts() {
+        val request = ++fontRequest; val selected = settings.fontId
+        fontBusy = true
+        worker.execute {
+            val list = fontStore.entries()
+            val face = runCatching { fontStore.load(selected) }
+            post {
+                if (request == fontRequest) {
+                    fonts = list; typeface = face.getOrDefault(Typeface.MONOSPACE); fontBusy = false
+                    if (face.isFailure) error = "字体加载失败，已临时使用系统等宽字体"
+                    sessionManager.sessions.forEach { it.terminal.appearance(typeface, settings.fontSize) }
+                }
+            }
+        }
+    }
+    fun importFont(uri: Uri) = operation("字体导入失败，请选择有效的 TTF / OTF 文件（不超过 40 MiB）") {
+        fontStore.import(uri); post { reloadFonts() }
+    }
+    fun renameFont(id: String, name: String) = operation("字体名称保存失败") {
+        fontStore.rename(id, name); post { reloadFonts() }
+    }
+    fun deleteFont(id: String) = operation("字体删除失败") {
+        fontStore.delete(id); post {
+            if (settings.fontId == id) updateSettings(settings.copy(fontId = "system")) else reloadFonts()
+        }
+    }
     private fun post(action: () -> Unit) { main.post { if (!cleared) action() } }
     fun clearError() { error = null }
     private fun refresh() = worker.execute { reload() }
@@ -48,7 +89,7 @@ class ShellDeckModel(application: Application) : AndroidViewModel(application) {
         catch (_: Exception) { post { error = "无法读取本地数据" } }
     }
     private fun operation(failure: String, action: () -> Unit) {
-        if (busy) return
+        if (busy || cleared) return
         busy = true
         worker.execute {
             try { action(); reload() }
@@ -72,7 +113,9 @@ class ShellDeckModel(application: Application) : AndroidViewModel(application) {
     }
     fun deleteHost(id: String) = operation("删除服务器失败") { dao.deleteHost(id) }
     fun deleteIdentity(id: String) {
-        if (hosts.any { it.identityId == id }) { error = "此身份仍被服务器引用，请先修改或删除相关服务器"; return }
+        if (hosts.any { it.identityId == id } || sessionManager.sessions.any { !it.ended && it.host.identityId == id }) {
+            error = "此身份仍被服务器或活动会话引用，请先修改服务器并关闭相关连接"; return
+        }
         operation("删除身份失败，请检查是否仍有服务器引用") { dao.deleteIdentity(id) }
     }
     fun importIdentity(label: String, pasted: String, uri: Uri?, passphrase: String, imported: () -> Unit) {
@@ -105,86 +148,11 @@ class ShellDeckModel(application: Application) : AndroidViewModel(application) {
         }
     }
     fun connect(host: HostRecord, secret: String) {
-        disconnect()
-        val attempt = ++generation
-        val password = secret.toCharArray().also { loginSecret = it }
-        activeHost = host; connectionStatus = "准备连接…"
-        val verifier = HostTrust(host.hostname, host.port,
-            read = { dao.knownHost(host.hostname, host.port)?.let { HostPin(it.algorithm, it.fingerprint) } },
-            save = { pin -> dao.saveKnownHost(KnownHostRecord().apply {
-                hostname = host.hostname; port = host.port; algorithm = pin.algorithm; fingerprint = pin.fingerprint
-            }) },
-            ask = { request ->
-                val future = CompletableFuture<TrustDecision>()
-                pendingTrust = future
-                post {
-                    if (generation == attempt && terminal != null) challenge = request
-                    else future.complete(TrustDecision.CANCEL)
-                }
-                try { future.get(90, TimeUnit.SECONDS) }
-                catch (_: Exception) { TrustDecision.CANCEL }
-                finally { if (pendingTrust === future) pendingTrust = null; post { if (generation == attempt) challenge = null } }
-            })
-        val transport = SshTransport(host.hostname, host.port, host.username, verifier,
-            authenticate = { client ->
-                try {
-                    val identityId = host.identityId
-                    if (identityId == null) client.authPassword(host.username, password)
-                    else {
-                        val identity = requireNotNull(dao.identity(identityId))
-                        val bytes = vault.decrypt(identity.id, identity.encryptedKey)
-                        try {
-                            val keys = SshKeys.loadWithPassphraseRequest(client, bytes) {
-                                val future = CompletableFuture<CharArray?>()
-                                main.post {
-                                    if (!cleared && generation == attempt && terminal != null && !future.isDone) {
-                                        pendingPassphrase = future
-                                        passphraseIdentity = identity.label
-                                        connectionStatus = "等待私钥口令…"
-                                    } else future.complete(null)
-                                }
-                                try { future.get(90, TimeUnit.SECONDS) }
-                                catch (_: Exception) {
-                                    future.complete(null)
-                                    future.getNow(null)?.fill('\u0000')
-                                    null
-                                }
-                                finally {
-                                    // Close the future on timeout so a late UI submission cannot retain a secret.
-                                    future.complete(null)
-                                    post {
-                                        if (pendingPassphrase === future) pendingPassphrase = null
-                                        if (generation == attempt) passphraseIdentity = null
-                                    }
-                                }
-                            }
-                            post { if (generation == attempt) connectionStatus = "正在认证…" }
-                            client.authPublickey(host.username, keys)
-                        }
-                        finally { bytes.fill(0) }
-                    }
-                } finally { password.fill('\u0000') }
-            },
-            status = { status -> post { if (generation == attempt) connectionStatus = status } })
-        val controller = TerminalController(getApplication()) { password.fill('\u0000') }
-        controller.session = TerminalSession(transport, 5000, controller)
-        terminal = controller
-    }
-    fun trust(decision: TrustDecision) { pendingTrust?.complete(decision); challenge = null }
-    fun submitPassphrase(secret: String) {
-        val chars = secret.toCharArray()
-        if (pendingPassphrase?.complete(chars) != true) chars.fill('\u0000')
-        passphraseIdentity = null
-    }
-    fun disconnect() {
-        generation++
-        pendingTrust?.complete(TrustDecision.CANCEL); pendingTrust = null; challenge = null
-        pendingPassphrase?.complete(null); pendingPassphrase = null; passphraseIdentity = null
-        terminal?.close(); terminal = null; activeHost = null
-        loginSecret?.fill('\u0000'); loginSecret = null
+        sessionManager.connect(host, secret)
+        sessionManager.selected?.terminal?.appearance(typeface, settings.fontSize)
     }
     override fun onCleared() {
-        cleared = true; disconnect()
+        cleared = true; sessionManager.closeAll()
         worker.execute { database.close() }; worker.shutdown()
     }
 }

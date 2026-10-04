@@ -30,12 +30,18 @@ import cc.cherr.shelldeck.data.HostRecord
 import cc.cherr.shelldeck.data.IdentityRecord
 import cc.cherr.shelldeck.ssh.TrustDecision
 import cc.cherr.shelldeck.ui.ShellDeckTheme
+import cc.cherr.shelldeck.settings.SettingsScreen
+import cc.cherr.shelldeck.keyboard.ExtraKeysBar
+import androidx.compose.runtime.saveable.rememberSaveable
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        setContent { ShellDeckTheme { ShellDeckApp() } }
+        setContent {
+            val model: ShellDeckModel = viewModel()
+            ShellDeckTheme(model.settings.theme, model.settings.dynamicColor) { ShellDeckApp(model) }
+        }
     }
 }
 
@@ -45,51 +51,68 @@ internal fun terminalKeyboardInsets(terminalActive: Boolean): WindowInsets =
     if (terminalActive) WindowInsets.imeAnimationTarget else WindowInsets.ime
 
 @Composable
+@OptIn(ExperimentalLayoutApi::class)
 private fun ShellDeckApp(model: ShellDeckModel = viewModel()) {
     var hostEditor by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<HostRecord?>(null) }
     var importing by remember { mutableStateOf(false) }
     var login by remember { mutableStateOf<HostRecord?>(null) }
-    var disconnect by remember { mutableStateOf(false) }
+    var closing by remember { mutableStateOf<String?>(null) }
+    var showSettings by rememberSaveable { mutableStateOf(false) }
+    var switching by remember { mutableStateOf(false) }
     var deletingHost by remember { mutableStateOf<HostRecord?>(null) }
     var deletingIdentity by remember { mutableStateOf<IdentityRecord?>(null) }
-    val terminal = model.terminal
-    BackHandler(terminal != null) { disconnect = true }
+    val manager = model.sessionManager
+    val connection = manager.selected
+    val terminal = if (showSettings) null else connection?.terminal
+    BackHandler(terminal != null && !showSettings) {
+        if (terminal?.hideKeyboardIfVisible() != true) manager.home()
+    }
     Scaffold { insets ->
         // A terminal resize reaches the remote TUI. Use the IME destination, not each animation frame.
         val keyboardInsets = terminalKeyboardInsets(terminal != null)
         Column(Modifier.fillMaxSize().padding(insets).consumeWindowInsets(insets).windowInsetsPadding(keyboardInsets)) {
-            if (terminal != null) {
+            if (showSettings) SettingsScreen(model) { showSettings = false }
+            else if (terminal != null && connection != null) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Column(Modifier.weight(1f).padding(horizontal = 12.dp, vertical = 4.dp)) {
-                        Text(model.activeHost?.label ?: "ShellDeck", style = MaterialTheme.typography.titleMedium, maxLines = 1)
-                        Text(model.connectionStatus, style = MaterialTheme.typography.labelSmall, maxLines = 2)
+                        Text(connection.host.label, style = MaterialTheme.typography.titleMedium, maxLines = 1)
+                        Text(connection.status, style = MaterialTheme.typography.labelSmall, maxLines = 2)
                     }
-                    TextButton(onClick = { disconnect = true }) { Text("断开") }
+                    TextButton(onClick = { switching = true }) { Text("会话(${manager.sessions.size})") }
+                    TextButton(onClick = { terminal.leave(); showSettings = true }) { Text("设置") }
+                    TextButton(onClick = { closing = connection.id }) { Text("关闭") }
                 }
                 key(terminal) {
                     AndroidView(factory = terminal::createView, modifier = Modifier.weight(1f).fillMaxWidth(),
                         onRelease = terminal::releaseView, update = {})
                 }
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-                    TextButton(onClick = terminal::showKeyboard) { Text("键盘") }
-                    TextButton(onClick = { terminal.special(KeyEvent.KEYCODE_ESCAPE) }) { Text("ESC") }
-                    TextButton(onClick = { terminal.ctrl = !terminal.ctrl }) { Text(if (terminal.ctrl) "CTRL ●" else "CTRL") }
-                    TextButton(onClick = { terminal.alt = !terminal.alt }) { Text(if (terminal.alt) "ALT ●" else "ALT") }
-                    TextButton(onClick = { terminal.special(KeyEvent.KEYCODE_TAB) }) { Text("TAB") }
-                    listOf("←" to KeyEvent.KEYCODE_DPAD_LEFT, "↓" to KeyEvent.KEYCODE_DPAD_DOWN,
-                        "↑" to KeyEvent.KEYCODE_DPAD_UP, "→" to KeyEvent.KEYCODE_DPAD_RIGHT).forEach { (label, code) ->
-                        TextButton(onClick = { terminal.special(code) }) { Text(label) }
-                    }
-                }
+                ExtraKeysBar(model.settings.keyboard, terminal)
             } else {
-                Text("ShellDeck", Modifier.padding(16.dp), style = MaterialTheme.typography.headlineMedium)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("ShellDeck", Modifier.padding(16.dp), style = MaterialTheme.typography.headlineMedium)
+                    TextButton(onClick = { showSettings = true }) { Text("设置") }
+                }
                 Row {
                     TextButton(enabled = !model.busy, onClick = { editing = null; hostEditor = true }) { Text("添加服务器") }
                     TextButton(enabled = !model.busy, onClick = { importing = true }) { Text("导入 SSH Key") }
                 }
                 if (model.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
                 LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    if (manager.sessions.isNotEmpty()) item { Text("活动会话", style = MaterialTheme.typography.titleLarge) }
+                    items(manager.sessions, key = { "session:${it.id}" }) { session ->
+                        OutlinedCard(Modifier.fillMaxWidth()) {
+                            Column(Modifier.padding(12.dp)) {
+                                Text("${session.host.label} · ${session.id.take(4)}")
+                                Text(if (session.challenge != null) "等待确认服务器指纹" else session.status)
+                                Row {
+                                    TextButton(onClick = { manager.select(session.id) }) { Text(if (session.ended) "查看终端" else "打开") }
+                                    TextButton(onClick = { closing = session.id }) { Text("关闭连接") }
+                                }
+                            }
+                        }
+                    }
+                    item { Text("服务器", style = MaterialTheme.typography.titleLarge) }
                     if (model.hosts.isEmpty()) item {
                         Text("先导入 SSH 私钥，再添加服务器。私钥会加密保存，口令仅用于本次操作。")
                     }
@@ -138,20 +161,20 @@ private fun ShellDeckApp(model: ShellDeckModel = viewModel()) {
             } }, confirmButton = { TextButton(onClick = { model.connect(host, secret); secret = ""; login = null }) { Text("连接") } },
             dismissButton = { TextButton(onClick = { secret = ""; login = null }) { Text("取消") } })
     }
-    model.passphraseIdentity?.let { identity ->
+    connection?.takeUnless { showSettings }?.passphraseIdentity?.let { identity ->
         var secret by remember(identity) { mutableStateOf("") }
         AlertDialog(properties = DialogProperties(securePolicy = SecureFlagPolicy.SecureOn),
-            onDismissRequest = { secret = ""; model.disconnect() }, title = { Text("解锁私钥") },
+            onDismissRequest = { secret = ""; manager.close(connection!!.id) }, title = { Text("解锁私钥") },
             text = { Column {
                 Text("$identity 使用了加密私钥。请输入口令，仅用于本次连接，不会保存。")
                 OutlinedTextField(secret, { secret = it }, label = { Text("Passphrase") }, singleLine = true,
                     visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password))
             } },
-            confirmButton = { TextButton(onClick = { model.submitPassphrase(secret); secret = "" }) { Text("连接") } },
-            dismissButton = { TextButton(onClick = { secret = ""; model.disconnect() }) { Text("取消") } })
+            confirmButton = { TextButton(onClick = { connection!!.submitPassphrase(secret); secret = "" }) { Text("连接") } },
+            dismissButton = { TextButton(onClick = { secret = ""; manager.close(connection!!.id) }) { Text("取消") } })
     }
-    model.challenge?.let { challenge ->
-        AlertDialog(onDismissRequest = { model.trust(TrustDecision.CANCEL) },
+    connection?.takeUnless { showSettings }?.challenge?.let { challenge ->
+        AlertDialog(onDismissRequest = { connection!!.trust(TrustDecision.CANCEL) },
             title = { Text(if (challenge.previous == null) "确认服务器指纹" else "警告：服务器指纹已改变") },
             text = { Column(Modifier.verticalScroll(rememberScrollState())) {
                 Text("${challenge.hostname}:${challenge.port}")
@@ -163,13 +186,20 @@ private fun ShellDeckApp(model: ShellDeckModel = viewModel()) {
                 Text("请与服务器管理员提供的 SHA256 指纹核对。")
             } },
             confirmButton = { Column {
-                TextButton(onClick = { model.trust(TrustDecision.SAVE) }) { Text(if (challenge.previous == null) "信任并保存" else "确认更换并保存") }
-                TextButton(onClick = { model.trust(TrustDecision.ONCE) }) { Text("仅信任本次") }
-            } }, dismissButton = { TextButton(onClick = { model.trust(TrustDecision.CANCEL) }) { Text("取消") } })
+                TextButton(onClick = { connection!!.trust(TrustDecision.SAVE) }) { Text(if (challenge.previous == null) "信任并保存" else "确认更换并保存") }
+                TextButton(onClick = { connection!!.trust(TrustDecision.ONCE) }) { Text("仅信任本次") }
+            } }, dismissButton = { TextButton(onClick = { connection!!.trust(TrustDecision.CANCEL) }) { Text("取消") } })
     }
-    if (disconnect) ConfirmDialog("断开连接？", "这将关闭当前 SSH 会话。远端 tmux 会话可以在下次连接时重新附加。", { disconnect = false }) {
-        model.disconnect(); disconnect = false
-    }
+    closing?.let { id -> ConfirmDialog("关闭连接？", "只关闭这一条 SSH 连接。远端 tmux 会话可以在下次连接时重新附加。", { closing = null }) {
+        manager.close(id); closing = null
+    } }
+    if (switching) AlertDialog(onDismissRequest = { switching = false }, title = { Text("切换会话") },
+        text = { Column(Modifier.verticalScroll(rememberScrollState())) {
+            TextButton(onClick = { manager.home(); switching = false }) { Text("返回首页（保持连接）") }
+            manager.sessions.forEach { session -> TextButton(onClick = { manager.select(session.id); switching = false }) {
+                Text("${session.host.label} · ${session.id.take(4)} — ${session.status}")
+            } }
+        } }, confirmButton = { TextButton(onClick = { switching = false }) { Text("取消") } })
     deletingHost?.let { host -> ConfirmDialog("删除服务器？", host.label, { deletingHost = null }) { model.deleteHost(host.id); deletingHost = null } }
     deletingIdentity?.let { identity -> ConfirmDialog("删除身份？", "${identity.label}：删除后需要重新导入私钥。", { deletingIdentity = null }) { model.deleteIdentity(identity.id); deletingIdentity = null } }
     model.error?.let { message -> AlertDialog(onDismissRequest = model::clearError, title = { Text("操作未完成") }, text = { Text(message) }, confirmButton = { TextButton(onClick = model::clearError) { Text("确定") } }) }

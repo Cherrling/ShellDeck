@@ -1,0 +1,187 @@
+package cc.cherr.shelldeck.settings
+
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import cc.cherr.shelldeck.ShellDeckModel
+import cc.cherr.shelldeck.keyboard.*
+import org.json.JSONArray
+
+@Composable
+fun SettingsScreen(model: ShellDeckModel, onBack: () -> Unit) {
+    var editing by rememberSaveable { mutableStateOf(false) }
+    var rename by remember { mutableStateOf<FontEntry?>(null) }
+    var deleting by remember { mutableStateOf<FontEntry?>(null) }
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) model.importFont(uri) }
+    if (editing) { KeyboardEditor(model.settings.keyboard, { editing = false }) {
+        model.updateSettings(model.settings.copy(keyboard = it)); editing = false
+    }; return }
+    BackHandler(onBack = onBack)
+    val settings = model.settings
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row { TextButton(onClick = onBack) { Text("返回") }; Text("设置", style = MaterialTheme.typography.headlineMedium) }
+        Text("外观", style = MaterialTheme.typography.titleLarge)
+        Choices(ThemeMode.entries, settings.theme, { when(it) { ThemeMode.SYSTEM -> "跟随系统"; ThemeMode.LIGHT -> "明亮"; ThemeMode.DARK -> "深色" } }) {
+            model.updateSettings(settings.copy(theme = it))
+        }
+        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+            Switch(settings.dynamicColor, { model.updateSettings(settings.copy(dynamicColor = it)) }); Text("动态配色")
+        }
+        HorizontalDivider()
+        Text("终端字体", style = MaterialTheme.typography.titleLarge)
+        if (model.fontBusy || model.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+        model.fonts.forEach { font ->
+            Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                RadioButton(settings.fontId == font.id, onClick = { model.updateSettings(settings.copy(fontId = font.id)) })
+                TextButton(onClick = { model.updateSettings(settings.copy(fontId = font.id)) }, modifier = Modifier.weight(1f)) { Text(font.label) }
+                if (font.imported) {
+                    TextButton(enabled = !model.busy, onClick = { rename = font }) { Text("改名") }
+                    TextButton(enabled = !model.busy, onClick = { deleting = font }) { Text("删除") }
+                }
+            }
+        }
+        TextButton(enabled = !model.busy, onClick = { picker.launch(arrayOf("*/*")) }) { Text("导入 TTF / OTF 字体") }
+        var size by remember(settings.fontSize) { mutableFloatStateOf(settings.fontSize.toFloat()) }
+        Text("字号：${size.toInt()} sp")
+        Slider(size, { size = it }, valueRange = 8f..32f, steps = 23,
+            onValueChangeFinished = { model.updateSettings(settings.copy(fontSize = size.toInt())) })
+        Text("终端配色（独立于 App 外观）")
+        Choices(TerminalPalette.entries, settings.palette, { if (it == TerminalPalette.DARK) "深色终端" else "浅色终端" }) {
+            model.updateSettings(settings.copy(palette = it))
+        }
+        Surface(color = if (settings.palette == TerminalPalette.DARK) androidx.compose.ui.graphics.Color.Black else androidx.compose.ui.graphics.Color.White,
+            contentColor = if (settings.palette == TerminalPalette.DARK) androidx.compose.ui.graphics.Color.White else androidx.compose.ui.graphics.Color.Black) {
+            Text("Aa 0123 [] {} <>\n中文等宽测试  ┌─┬─┐\n图标：\uE0B0 \uF120 \uF07B", Modifier.fillMaxWidth().padding(12.dp),
+                fontFamily = FontFamily(model.typeface), fontSize = size.sp)
+        }
+        Text("Maple Mono：SIL Open Font License 1.1", style = MaterialTheme.typography.bodySmall)
+        HorizontalDivider()
+        Text("快捷键", style = MaterialTheme.typography.titleLarge)
+        Text("两行整体左右滑动。修饰键点按用于下一次输入；按住持续生效；长按后松手锁定，再点解除。")
+        TextButton(onClick = { editing = true }) { Text("编辑快捷键布局") }
+    }
+    rename?.let { font ->
+        var label by remember(font.id) { mutableStateOf(font.label) }
+        AlertDialog(onDismissRequest = { rename = null }, title = { Text("字体名称") },
+            text = { OutlinedTextField(label, { if (it.length <= 80) label = it }, singleLine = true) },
+            confirmButton = { TextButton(enabled = label.isNotBlank(), onClick = { model.renameFont(font.id, label); rename = null }) { Text("保存") } },
+            dismissButton = { TextButton(onClick = { rename = null }) { Text("取消") } })
+    }
+    deleting?.let { font -> AlertDialog(onDismissRequest = { deleting = null }, title = { Text("删除字体？") },
+        text = { Text("${font.label}：若正在使用，将切回系统等宽字体。") },
+        confirmButton = { TextButton(onClick = { model.deleteFont(font.id); deleting = null }) { Text("删除") } },
+        dismissButton = { TextButton(onClick = { deleting = null }) { Text("取消") } }) }
+}
+
+@Composable
+private fun <T> Choices(options: List<T>, selected: T, label: (T) -> String, choose: (T) -> Unit) {
+    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        options.forEach { item -> FilterChip(selected == item, onClick = { choose(item) }, label = { Text(label(item)) }) }
+    }
+}
+
+@Composable
+private fun KeyboardEditor(initial: KeyboardProfile, cancel: () -> Unit, save: (KeyboardProfile) -> Unit) {
+    var json by rememberSaveable { mutableStateOf(SettingsStore.encodeKeyboard(initial).toString()) }
+    val draft = remember(json) { SettingsStore.decodeKeyboard(JSONArray(json)) }
+    var selected by rememberSaveable { mutableStateOf<Pair<Int, Int>?>(null) }
+    var discard by remember { mutableStateOf(false) }
+    fun back() { if (draft != initial) discard = true else cancel() }
+    fun replace(rows: List<List<KeySlot>>) { json = SettingsStore.encodeKeyboard(KeyboardProfile(rows)).toString() }
+    BackHandler { back() }
+    Column(Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row { TextButton(onClick = { back() }) { Text("返回") }; TextButton(onClick = { save(draft) }) { Text("保存布局") } }
+        Text("编辑快捷键", style = MaterialTheme.typography.headlineSmall)
+        Text("左右滑动查看全部按键，点击位置进行编辑。保存后才会应用。")
+        Column(Modifier.horizontalScroll(rememberScrollState())) {
+            draft.rows.forEachIndexed { r, row -> Row {
+                row.forEachIndexed { c, slot -> OutlinedButton(onClick = { selected = r to c }, modifier = Modifier.width((64 * slot.width).dp).height(48.dp), contentPadding = PaddingValues(2.dp)) { Text(slot.label, maxLines = 1) } }
+                TextButton(enabled = row.size < 32, onClick = {
+                    replace(draft.rows.mapIndexed { i, keys -> if (i == r) keys + KeySlot("新键", KeyAction.Character(" ")) else keys }); selected = r to row.size
+                }) { Text("＋") }
+            } }
+        }
+        TextButton(onClick = { json = SettingsStore.encodeKeyboard(KeyboardProfile.default()).toString() }) { Text("恢复默认布局（保存后生效）") }
+    }
+    selected?.let { (r, c) ->
+        val slot = draft.rows[r][c]
+        KeyEditor(slot, c > 0, c < draft.rows[r].lastIndex, draft.rows[r].size > 1, draft.rows[r].size > 1 && draft.rows[1-r].size < 32, { selected = null }, { updated ->
+            replace(draft.rows.mapIndexed { i, row -> if (i == r) row.mapIndexed { j, item -> if (j == c) updated else item } else row }); selected = null
+        }, { direction, updated ->
+            val rows = draft.rows.map { it.toMutableList() }
+            rows[r][c] = updated
+            when (direction) {
+                -1, 1 -> { val next = c + direction; if (next in rows[r].indices) java.util.Collections.swap(rows[r], c, next) }
+                2 -> if (rows[r].size > 1 && rows[1-r].size < 32) rows[1-r].add(rows[r].removeAt(c))
+                0 -> if (rows[r].size > 1) rows[r].removeAt(c)
+            }
+            replace(rows); selected = null
+        })
+    }
+    if (discard) AlertDialog(onDismissRequest = { discard = false }, title = { Text("放弃未保存的布局？") },
+        confirmButton = { TextButton(onClick = cancel) { Text("放弃") } }, dismissButton = { TextButton(onClick = { discard = false }) { Text("继续编辑") } })
+}
+
+@Composable
+private fun KeyEditor(initial: KeySlot, canLeft: Boolean, canRight: Boolean, canDelete: Boolean, canChangeRow: Boolean, cancel: () -> Unit, save: (KeySlot) -> Unit, move: (Int, KeySlot) -> Unit) {
+    val types = listOf("字符", "特殊键", "修饰键", "转义序列", "宏", "键盘开关")
+    var label by rememberSaveable { mutableStateOf(initial.label) }
+    var width by rememberSaveable { mutableIntStateOf(initial.width) }
+    var type by rememberSaveable { mutableStateOf(when(initial.action) {
+        is KeyAction.Character -> "字符"; is KeyAction.Special -> "特殊键"; is KeyAction.Modifier -> "修饰键"
+        is KeyAction.EscapeSequence -> "转义序列"; is KeyAction.Macro -> "宏"; else -> "键盘开关"
+    }) }
+    var text by rememberSaveable { mutableStateOf(when(val a = initial.action) {
+        is KeyAction.Character -> a.text; is KeyAction.Macro -> a.text
+        is KeyAction.EscapeSequence -> a.sequence.replace("\u001b", "\\e"); else -> ""
+    }) }
+    var special by rememberSaveable { mutableStateOf((initial.action as? KeyAction.Special)?.key ?: SpecialKey.ESC) }
+    var modifier by rememberSaveable { mutableStateOf((initial.action as? KeyAction.Modifier)?.key ?: ModifierKey.SHIFT) }
+    var combo by rememberSaveable { mutableStateOf((initial.action as? KeyAction.Special)?.modifiers ?: emptySet()) }
+    val valid = label.isNotBlank() && (type !in listOf("字符", "宏", "转义序列") || text.isNotEmpty()) &&
+        (type != "字符" || (text.codePointCount(0, text.length) == 1 && text.codePointAt(0) !in 0xD800..0xDFFF))
+    fun editedSlot(): KeySlot {
+        val action = when(type) {
+            "字符" -> KeyAction.Character(text); "特殊键" -> KeyAction.Special(special, combo)
+            "修饰键" -> KeyAction.Modifier(modifier); "宏" -> KeyAction.Macro(text)
+            "转义序列" -> KeyAction.EscapeSequence(text.replace("\\e", "\u001b")); else -> KeyAction.ToggleKeyboard
+        }
+        return KeySlot(label, action, width)
+    }
+    AlertDialog(onDismissRequest = cancel, title = { Text("编辑按键") }, text = {
+        Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(label, { if (it.length <= 24) label = it }, label = { Text("显示名称") }, singleLine = true)
+            Choices(types, type, { it }) { type = it }
+            when (type) {
+                "特殊键" -> {
+                    Choices(SpecialKey.entries, special, { it.name }) { special = it }
+                    Row { ModifierKey.entries.forEach { m -> FilterChip(m in combo, onClick = { combo = if (m in combo) combo - m else combo + m }, label = { Text(m.name) }) } }
+                }
+                "修饰键" -> Choices(ModifierKey.entries, modifier, { it.name }) { modifier = it }
+                "键盘开关" -> Text("展开或收起软键盘")
+                else -> {
+                    OutlinedTextField(text, { if (it.length <= 4096) text = it }, label = { Text("发送内容") }, maxLines = 5)
+                    if (type == "字符") Text("填写一个字符；多个字符请使用宏。")
+                    if (type == "转义序列") Text("用 \\e 表示 ESC，例如 \\e[5~。")
+                    if (type == "宏") Text("按原样发送，不自动追加回车。需要执行命令时，在内容末尾输入换行。")
+                }
+            }
+            Choices(listOf(1,2,3), width, { "${it}倍宽" }) { width = it }
+            Row { TextButton(enabled = valid && canLeft, onClick = { move(-1, editedSlot()) }) { Text("左移") }; TextButton(enabled = valid && canRight, onClick = { move(1, editedSlot()) }) { Text("右移") } }
+            Row { TextButton(enabled = valid && canChangeRow, onClick = { move(2, editedSlot()) }) { Text("移到另一行") }; TextButton(enabled = valid && canDelete, onClick = { move(0, editedSlot()) }) { Text("删除") } }
+        }
+    }, confirmButton = { TextButton(enabled = valid, onClick = {
+        save(editedSlot())
+    }) { Text("确定") } }, dismissButton = { TextButton(onClick = cancel) { Text("取消") } })
+}
