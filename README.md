@@ -2,7 +2,7 @@
 
 面向远程开发、tmux 和现代 TUI 工作流的 Android SSH 客户端。
 
-当前 alpha.3 已支持真实 SSH：Host 管理、SSH 私钥文件/粘贴导入、加密 Identity、服务器指纹确认、PTY 终端与基础快捷键。优先验证 OpenSSH Ed25519 / RSA（含带口令私钥）；支持临时密码登录。当前为单会话，后台保活和完整定制功能尚未实现。
+当前 alpha.4 已支持真实 SSH：Host 管理、SSH 私钥文件/粘贴导入、加密 Identity、服务器指纹确认、PTY 终端与基础快捷键。支持 OpenSSH、传统 PEM 和 PKCS#8 私钥，密钥登录仅在确需解密时询问口令；支持临时密码登录。终端按键盘动画的目标尺寸调整，避免逐帧发送 PTY resize。当前为单会话，后台保活和完整定制功能尚未实现。
 
 ## 开发环境
 
@@ -16,7 +16,7 @@ python3 scripts/ssh_test_server.py -- ./gradlew :app:lintDebug :app:testDebugUni
 python3 -m unittest discover -s scripts -p 'test_*.py'
 ```
 
-APK 在 `app/build/outputs/apk/debug/app-debug.apk`。测试命令需要本机 OpenSSH sshd / ssh-keygen，只启动临时 loopback 公钥认证服务；测试密钥在退出时删除。终端模块包含上游回归测试和会话接入测试；Python 测试覆盖发布版本、包名、debuggable 和签名指纹的校验逻辑。
+APK 在 `app/build/outputs/apk/debug/app-debug.apk`。测试命令需要本机 OpenSSH sshd / ssh-keygen 和 OpenSSL，只启动临时 loopback 公钥认证服务；测试密钥在退出时删除。终端模块包含上游回归测试和会话接入测试；Python 测试覆盖发布版本、包名、debuggable 和签名指纹的校验逻辑。
 
 本仓库所在的 `~/code` 为 NFS 时，先复制源码到本地磁盘或空间充足的 `/dev/shm`，把 `GRADLE_USER_HOME` 和 Android SDK 也置于本地存储再构建。不要把构建缓存同步回源码仓库。
 

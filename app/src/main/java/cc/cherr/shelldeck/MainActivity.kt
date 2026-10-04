@@ -40,6 +40,11 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
+@OptIn(ExperimentalLayoutApi::class)
+internal fun terminalKeyboardInsets(terminalActive: Boolean): WindowInsets =
+    if (terminalActive) WindowInsets.imeAnimationTarget else WindowInsets.ime
+
+@Composable
 private fun ShellDeckApp(model: ShellDeckModel = viewModel()) {
     var hostEditor by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<HostRecord?>(null) }
@@ -51,7 +56,9 @@ private fun ShellDeckApp(model: ShellDeckModel = viewModel()) {
     val terminal = model.terminal
     BackHandler(terminal != null) { disconnect = true }
     Scaffold { insets ->
-        Column(Modifier.fillMaxSize().padding(insets).consumeWindowInsets(insets).imePadding()) {
+        // A terminal resize reaches the remote TUI. Use the IME destination, not each animation frame.
+        val keyboardInsets = terminalKeyboardInsets(terminal != null)
+        Column(Modifier.fillMaxSize().padding(insets).consumeWindowInsets(insets).windowInsetsPadding(keyboardInsets)) {
             if (terminal != null) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Column(Modifier.weight(1f).padding(horizontal = 12.dp, vertical = 4.dp)) {
@@ -93,7 +100,9 @@ private fun ShellDeckApp(model: ShellDeckModel = viewModel()) {
                                 Text("${host.username}@${host.hostname}:${host.port}")
                                 Text(model.identities.firstOrNull { it.id == host.identityId }?.label ?: "密码登录", style = MaterialTheme.typography.bodySmall)
                                 Row {
-                                    TextButton(enabled = !model.busy, onClick = { login = host }) { Text("连接") }
+                                    TextButton(enabled = !model.busy, onClick = {
+                                        if (host.identityId == null) login = host else model.connect(host, "")
+                                    }) { Text("连接") }
                                     TextButton(enabled = !model.busy, onClick = { editing = host; hostEditor = true }) { Text("编辑") }
                                     TextButton(enabled = !model.busy, onClick = { deletingHost = host }) { Text("删除") }
                                 }
@@ -123,11 +132,23 @@ private fun ShellDeckApp(model: ShellDeckModel = viewModel()) {
         var secret by remember(host.id) { mutableStateOf("") }
         AlertDialog(properties = DialogProperties(securePolicy = SecureFlagPolicy.SecureOn), onDismissRequest = { secret = ""; login = null }, title = { Text("连接 ${host.label}") },
             text = { Column {
-                Text(if (host.identityId == null) "输入服务器登录密码，不会保存。" else "输入私钥口令；无口令私钥留空即可。口令不会保存。")
-                OutlinedTextField(value = secret, onValueChange = { secret = it }, label = { Text(if (host.identityId == null) "密码" else "Passphrase（可留空）") },
+                Text("输入服务器登录密码，不会保存。")
+                OutlinedTextField(value = secret, onValueChange = { secret = it }, label = { Text("密码") },
                     singleLine = true, visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password))
             } }, confirmButton = { TextButton(onClick = { model.connect(host, secret); secret = ""; login = null }) { Text("连接") } },
             dismissButton = { TextButton(onClick = { secret = ""; login = null }) { Text("取消") } })
+    }
+    model.passphraseIdentity?.let { identity ->
+        var secret by remember(identity) { mutableStateOf("") }
+        AlertDialog(properties = DialogProperties(securePolicy = SecureFlagPolicy.SecureOn),
+            onDismissRequest = { secret = ""; model.disconnect() }, title = { Text("解锁私钥") },
+            text = { Column {
+                Text("$identity 使用了加密私钥。请输入口令，仅用于本次连接，不会保存。")
+                OutlinedTextField(secret, { secret = it }, label = { Text("Passphrase") }, singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password))
+            } },
+            confirmButton = { TextButton(onClick = { model.submitPassphrase(secret); secret = "" }) { Text("连接") } },
+            dismissButton = { TextButton(onClick = { secret = ""; model.disconnect() }) { Text("取消") } })
     }
     model.challenge?.let { challenge ->
         AlertDialog(onDismissRequest = { model.trust(TrustDecision.CANCEL) },
@@ -193,7 +214,7 @@ private fun ImportDialog(model: ShellDeckModel, onDismiss: () -> Unit) {
     AlertDialog(properties = DialogProperties(securePolicy = SecureFlagPolicy.SecureOn), onDismissRequest = { if (!model.busy) onDismiss() }, title = { Text("导入 SSH 私钥") },
         text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedTextField(label, { label = it }, label = { Text("身份名称") }, singleLine = true, enabled = !model.busy)
-            Text("支持 OpenSSH Ed25519 / RSA；导入时验证口令，私钥加密保存。")
+            Text("支持 OpenSSH 与 PEM / PKCS#8 私钥（Ed25519、RSA）；私钥加密保存。")
             TextButton(enabled = !model.busy, onClick = { picker.launch(arrayOf("*/*")) }) { Text(if (uri == null) "选择私钥文件" else "已选择文件 · 重新选择") }
             if (uri == null) OutlinedTextField(pasted, { if (it.length <= 256 * 1024) pasted = it },
                 label = { Text("或粘贴私钥") }, minLines = 3, maxLines = 5, enabled = !model.busy, visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password))

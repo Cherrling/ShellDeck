@@ -22,9 +22,15 @@ class StorageDeviceTest {
         val rsa = java.security.KeyPairGenerator.getInstance("RSA", "BC").apply { initialize(2048) }.generateKeyPair()
         val rsaText = java.io.StringWriter()
         org.bouncycastle.openssl.jcajce.JcaPEMWriter(rsaText).use { it.writeObject(rsa) }
-        for ((pem, algorithm) in listOf(edPem to "Ed25519", rsaText.toString() to "SHA256withRSA")) {
+        fun pkcs8(bytes: ByteArray) = "-----BEGIN PRIVATE KEY-----\n" +
+            java.util.Base64.getMimeEncoder(64, byteArrayOf(10)).encodeToString(bytes) + "\n-----END PRIVATE KEY-----\n"
+        val edPkcs8 = pkcs8(org.bouncycastle.crypto.util.PrivateKeyInfoFactory.createPrivateKeyInfo(ed).encoded)
+        for ((pem, algorithm) in listOf(edPem to "Ed25519", rsaText.toString() to "SHA256withRSA",
+            edPkcs8 to "Ed25519", pkcs8(rsa.private.encoded) to "SHA256withRSA")) {
             net.schmizz.sshj.SSHClient().use { client ->
-                val parsed = SshKeys.load(client, pem.toByteArray(), charArrayOf())
+                val parsed = SshKeys.loadWithPassphraseRequest(client, pem.toByteArray()) {
+                    fail("Unencrypted key must not ask for a passphrase"); null
+                }
                 val signer = net.schmizz.sshj.common.SecurityUtils.getSignature(algorithm)
                 signer.initSign(parsed.getPrivate()); signer.update(byteArrayOf(1, 2, 3))
                 val signature = signer.sign()

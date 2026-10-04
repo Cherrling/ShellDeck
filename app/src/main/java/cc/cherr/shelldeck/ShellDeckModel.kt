@@ -28,6 +28,7 @@ class ShellDeckModel(application: Application) : AndroidViewModel(application) {
     @Volatile private var cleared = false
     private var generation = 0L
     @Volatile private var pendingTrust: CompletableFuture<TrustDecision>? = null
+    @Volatile private var pendingPassphrase: CompletableFuture<CharArray?>? = null
     private var loginSecret: CharArray? = null
     var hosts by mutableStateOf<List<HostRecord>>(emptyList()); private set
     var identities by mutableStateOf<List<IdentityRecord>>(emptyList()); private set
@@ -37,6 +38,7 @@ class ShellDeckModel(application: Application) : AndroidViewModel(application) {
     var activeHost by mutableStateOf<HostRecord?>(null); private set
     var connectionStatus by mutableStateOf(""); private set
     var challenge by mutableStateOf<HostChallenge?>(null); private set
+    var passphraseIdentity by mutableStateOf<String?>(null); private set
     init { refresh() }
     private fun post(action: () -> Unit) { main.post { if (!cleared) action() } }
     fun clearError() { error = null }
@@ -75,7 +77,7 @@ class ShellDeckModel(application: Application) : AndroidViewModel(application) {
     }
     fun importIdentity(label: String, pasted: String, uri: Uri?, passphrase: String, imported: () -> Unit) {
         val password = passphrase.toCharArray()
-        operation("私钥导入失败，请检查格式或口令；目前优先支持 OpenSSH Ed25519 / RSA") {
+        operation("私钥导入失败，请检查文件是否为完整的 OpenSSH / PEM 私钥，以及口令是否正确") {
             var bytes: ByteArray? = null
             try {
                 bytes = if (uri != null) getApplication<Application>().contentResolver.openInputStream(uri)!!.use { input ->
@@ -131,7 +133,34 @@ class ShellDeckModel(application: Application) : AndroidViewModel(application) {
                     else {
                         val identity = requireNotNull(dao.identity(identityId))
                         val bytes = vault.decrypt(identity.id, identity.encryptedKey)
-                        try { client.authPublickey(host.username, SshKeys.load(client, bytes, password)) }
+                        try {
+                            val keys = SshKeys.loadWithPassphraseRequest(client, bytes) {
+                                val future = CompletableFuture<CharArray?>()
+                                main.post {
+                                    if (!cleared && generation == attempt && terminal != null && !future.isDone) {
+                                        pendingPassphrase = future
+                                        passphraseIdentity = identity.label
+                                        connectionStatus = "等待私钥口令…"
+                                    } else future.complete(null)
+                                }
+                                try { future.get(90, TimeUnit.SECONDS) }
+                                catch (_: Exception) {
+                                    future.complete(null)
+                                    future.getNow(null)?.fill('\u0000')
+                                    null
+                                }
+                                finally {
+                                    // Close the future on timeout so a late UI submission cannot retain a secret.
+                                    future.complete(null)
+                                    post {
+                                        if (pendingPassphrase === future) pendingPassphrase = null
+                                        if (generation == attempt) passphraseIdentity = null
+                                    }
+                                }
+                            }
+                            post { if (generation == attempt) connectionStatus = "正在认证…" }
+                            client.authPublickey(host.username, keys)
+                        }
                         finally { bytes.fill(0) }
                     }
                 } finally { password.fill('\u0000') }
@@ -142,9 +171,15 @@ class ShellDeckModel(application: Application) : AndroidViewModel(application) {
         terminal = controller
     }
     fun trust(decision: TrustDecision) { pendingTrust?.complete(decision); challenge = null }
+    fun submitPassphrase(secret: String) {
+        val chars = secret.toCharArray()
+        if (pendingPassphrase?.complete(chars) != true) chars.fill('\u0000')
+        passphraseIdentity = null
+    }
     fun disconnect() {
         generation++
         pendingTrust?.complete(TrustDecision.CANCEL); pendingTrust = null; challenge = null
+        pendingPassphrase?.complete(null); pendingPassphrase = null; passphraseIdentity = null
         terminal?.close(); terminal = null; activeHost = null
         loginSecret?.fill('\u0000'); loginSecret = null
     }

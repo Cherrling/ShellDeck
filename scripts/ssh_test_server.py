@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Run a command against an isolated, public-key-only loopback OpenSSH server."""
 import getpass
+import base64
+import struct
 import os
 from pathlib import Path
 import shutil
@@ -27,9 +29,27 @@ def main():
             ("unauthorized", "ed25519", ""),
         ]:
             subprocess.run(["ssh-keygen", "-q", "-t", algorithm, "-N", password, "-f", str(root / name)], check=True)
+        # Re-encode the same authorized RSA key; exercise PEM formats independently of the filename.
+        for name in ["rsa-pem", "rsa-pem-encrypted"]:
+            shutil.copyfile(root / "rsa", root / name)
+            (root / name).chmod(0o600)
+            password = "test-passphrase" if name.endswith("encrypted") else ""
+            subprocess.run(["ssh-keygen", "-q", "-p", "-m", "PEM", "-P", "", "-N", password, "-f", str(root / name)], check=True, stdout=subprocess.DEVNULL)
+        for name in ["rsa-pkcs8", "rsa-pkcs8-encrypted"]:
+            options = ["-passout", "pass:test-passphrase"] if name.endswith("encrypted") else ["-nocrypt"]
+            subprocess.run(["openssl", "pkcs8", "-topk8", "-in", str(root / "rsa-pem"), "-out", str(root / name)] + options, check=True)
+        subprocess.run(["openssl", "genpkey", "-algorithm", "ED25519", "-out", str(root / "ed25519-pkcs8")], check=True)
+        subprocess.run(["openssl", "pkcs8", "-topk8", "-in", str(root / "ed25519-pkcs8"), "-out", str(root / "ed25519-pkcs8-encrypted"), "-passout", "pass:test-passphrase"], check=True)
+        public = subprocess.check_output(["openssl", "pkey", "-in", str(root / "ed25519-pkcs8"), "-pubout", "-outform", "DER"])
+        assert public[:12] == bytes.fromhex("302a300506032b6570032100") and len(public) == 44
+        wire = struct.pack(">I", 11) + b"ssh-ed25519" + struct.pack(">I", 32) + public[12:]
+        (root / "ed25519-pkcs8.pub").write_text("ssh-ed25519 " + base64.b64encode(wire).decode() + "\n")
+        subprocess.run(["ssh-keygen", "-q", "-t", "ecdsa", "-b", "256", "-m", "PEM", "-N", "", "-f", str(root / "ecdsa-pem")], check=True)
+        subprocess.run(["openssl", "ec", "-in", str(root / "ecdsa-pem"), "-no_public", "-out", str(root / "ecdsa-no-public")], check=True, stderr=subprocess.DEVNULL)
+        subprocess.run(["openssl", "pkcs8", "-topk8", "-nocrypt", "-in", str(root / "ecdsa-no-public"), "-out", str(root / "ecdsa-pkcs8")], check=True)
         (root / "test-shell").write_text('#!/bin/sh\nif [ -n "$SSH_ORIGINAL_COMMAND" ]; then exec /bin/sh -c "$SSH_ORIGINAL_COMMAND"; else exec /bin/bash --noprofile --norc -i; fi\n')
         (root / "test-shell").chmod(0o700)
-        authorized = ["ed25519", "ed25519-encrypted", "rsa", "rsa-encrypted"]
+        authorized = ["ed25519", "ed25519-encrypted", "rsa", "rsa-encrypted", "ed25519-pkcs8", "ecdsa-pem"]
         (root / "authorized_keys").write_text("".join((root / (name + ".pub")).read_text() for name in authorized))
         with socket.socket() as probe:
             probe.bind(("127.0.0.1", 0))

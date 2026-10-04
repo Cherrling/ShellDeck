@@ -22,12 +22,14 @@ class SshIntegrationTest {
         SshKeys.configure()
     }
     private fun verifier(accept: Boolean = true) = HostTrust("127.0.0.1", port, { null }, {}) { if (accept) TrustDecision.ONCE else TrustDecision.CANCEL }
-    @Test fun authenticatesAllFourKeyVariantsWithPasswordLoginDisabled() {
-        for (name in listOf("ed25519", "ed25519-encrypted", "rsa", "rsa-encrypted")) {
+    @Test fun authenticatesOpenSshAndPemVariantsAndRequestsOnlyNeededPassphrases() {
+        for (name in listOf("ed25519", "ed25519-encrypted", "rsa", "rsa-encrypted", "rsa-pem", "rsa-pem-encrypted", "rsa-pkcs8", "rsa-pkcs8-encrypted", "ed25519-pkcs8", "ed25519-pkcs8-encrypted", "ecdsa-pem", "ecdsa-pkcs8")) {
             SSHClient().use { ssh ->
                 ssh.addHostKeyVerifier(verifier()); ssh.connect("127.0.0.1", port)
                 val password = (if (name.endsWith("encrypted")) "test-passphrase" else "").toCharArray()
-                val key = SshKeys.load(ssh, File(root, name).readBytes(), password)
+                var prompts = 0
+                val key = SshKeys.loadWithPassphraseRequest(ssh, File(root, name).readBytes()) { prompts++; password }
+                assertEquals(name, if (name.endsWith("encrypted")) 1 else 0, prompts)
                 ssh.authPublickey(username, key)
                 ssh.startSession().use { session ->
                     val command = session.exec("printf 'SSH_OK'")
@@ -42,6 +44,16 @@ class SshIntegrationTest {
             assertThrows(Exception::class.java) { SshKeys.load(ssh, "not a key".toByteArray(), charArrayOf()) }
             ssh.addHostKeyVerifier(verifier()); ssh.connect("127.0.0.1", port)
             assertThrows(Exception::class.java) { ssh.authPublickey(username, SshKeys.load(ssh, File(root, "unauthorized").readBytes(), charArrayOf())) }
+        }
+    }
+    @Test fun cancellingEncryptedKeyPromptAndMalformedKeyDoNotAuthenticate() {
+        SSHClient().use { ssh ->
+            for (name in listOf("ed25519-encrypted", "rsa-pem-encrypted", "rsa-pkcs8-encrypted")) {
+                assertThrows(Exception::class.java) { SshKeys.loadWithPassphraseRequest(ssh, File(root, name).readBytes()) { null } }
+            }
+            var prompts = 0
+            assertThrows(Exception::class.java) { SshKeys.loadWithPassphraseRequest(ssh, "invalid".toByteArray()) { prompts++; null } }
+            assertEquals(0, prompts)
         }
     }
     @Test fun refusedHostKeyPreventsAuthentication() {
