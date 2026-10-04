@@ -35,7 +35,7 @@ fun SettingsScreen(model: ShellDeckModel, onIdentities: () -> Unit = {}, onEdito
     BackHandler(onBack = onBack)
     val settings = model.settings
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Row { TextButton(onClick = onBack) { Text("返回") }; Text("设置", style = MaterialTheme.typography.headlineMedium) }
+        Text("设置", style = MaterialTheme.typography.headlineMedium)
         ListItem(headlineContent = { Text("SSH 身份与密钥") },
             supportingContent = { Text("导入和管理私钥，供服务器共用") }, modifier = Modifier.clickable(onClick = onIdentities))
         HorizontalDivider()
@@ -117,8 +117,10 @@ private fun KeyboardEditor(initial: KeyboardProfile, sizing: KeyboardSizing, can
     fun replace(rows: List<List<KeySlot>>) { json = SettingsStore.encodeKeyboard(KeyboardProfile(rows)).toString() }
     BackHandler { back() }
     Column(Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Row { TextButton(onClick = { back() }) { Text("返回") }; TextButton(onClick = { save(draft) }) { Text("保存布局") } }
-        Text("编辑快捷键", style = MaterialTheme.typography.headlineSmall)
+        Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+            Text("编辑快捷键", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
+            TextButton(onClick = { save(draft) }) { Text("保存布局") }
+        }
         Text("点击修改内容，长按拖动排序或移到另一行；拖到左右边缘可自动滚动。保存后才会应用。")
         KeyboardLayoutEditor(draft, sizing,
             edit = { selected = it.row to it.index },

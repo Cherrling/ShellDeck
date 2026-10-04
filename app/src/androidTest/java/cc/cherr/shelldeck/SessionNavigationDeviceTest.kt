@@ -71,6 +71,10 @@ class SessionNavigationDeviceTest {
             ui.waitUntil(5000) { model.sessionManager.selected == null }
             ui.onNodeWithText("活动会话").assertIsDisplayed()
             ui.onNodeWithTag("page-SESSIONS").assertIsSelected()
+            ui.runOnUiThread { connection.terminal.session.write("printf '\\033]2;Codex project test\\007'; sleep 30\n") }
+            ui.waitUntil(5000) { connection.terminal.title == "Codex project test" }
+            ui.onNodeWithText("Codex project test", substring = false).assertIsDisplayed()
+            ui.onNodeWithText("Navigation test host · 会话 ${connection.number}").assertIsDisplayed()
             ui.runOnIdle { assertTrue(androidx.core.view.WindowCompat.getInsetsController(ui.activity.window, ui.activity.window.decorView).isAppearanceLightStatusBars) }
             ui.runOnIdle { assertNull(ui.activity.onTerminalFontSizeChange) }
             ui.activityRule.scenario.recreate()
@@ -78,15 +82,19 @@ class SessionNavigationDeviceTest {
             ui.onNodeWithText("设置", substring = false).performClick()
             ui.runOnIdle { assertNull(ui.activity.onTerminalFontSizeChange) }
             ui.onNodeWithText("字号：14 sp").performScrollTo().assertIsDisplayed()
-            ui.onNodeWithText("返回", substring = false).performScrollTo().performClick()
+            androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
             ui.onNodeWithTag("page-SESSIONS").performClick()
-            ui.onNodeWithText("打开", substring = false).performClick()
+            ui.onNodeWithTag("session-${connection.id}").performClick()
             ui.onNodeWithText("Navigation test host", substring = false).assertDoesNotExist()
             ui.onNodeWithContentDescription("终端菜单").assertDoesNotExist()
             ui.onNodeWithContentDescription("切换会话").assertDoesNotExist()
             ui.runOnIdle { assertSame(connection, model.sessionManager.selected); assertTrue(connection.terminal.session.isReady) }
             ui.runOnUiThread { model.sessionManager.home() }
-            ui.onNodeWithText("关闭连接", substring = false).performClick()
+            ui.onNodeWithTag("close-session-${connection.id}").performClick()
+            ui.runOnIdle { assertNull(model.sessionManager.selected); assertFalse(connection.ended) }
+            ui.onNodeWithText("取消", substring = false).performClick()
+            ui.runOnIdle { assertTrue(connection.terminal.session.isReady) }
+            ui.onNodeWithTag("close-session-${connection.id}").performClick()
             ui.onNodeWithText("确认", substring = false).performClick()
             ui.runOnIdle { assertTrue(model.sessionManager.sessions.isEmpty()); assertTrue(connection.ended) }
         } finally {

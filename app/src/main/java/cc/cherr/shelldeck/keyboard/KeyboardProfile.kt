@@ -40,20 +40,20 @@ data class KeyboardProfile(val rows: List<List<KeySlot>>) {
     }
     companion object {
         fun default() = KeyboardProfile(listOf(
-            listOf(KeySlot("键盘", KeyAction.ToggleKeyboard), KeySlot("ESC", KeyAction.Special(SpecialKey.ESC)),
-                KeySlot("CTRL", KeyAction.Modifier(ModifierKey.CTRL)), KeySlot("ALT", KeyAction.Modifier(ModifierKey.ALT)),
-                KeySlot("SHIFT", KeyAction.Modifier(ModifierKey.SHIFT)), KeySlot("TAB", KeyAction.Special(SpecialKey.TAB)),
-                KeySlot("HOME", KeyAction.Special(SpecialKey.HOME)), KeySlot("END", KeyAction.Special(SpecialKey.END))),
-            listOf(KeySlot("'", KeyAction.Character("'")), KeySlot("\"", KeyAction.Character("\"")),
-                KeySlot("%", KeyAction.Character("%")), KeySlot("[", KeyAction.Character("[")),
-                KeySlot("←", KeyAction.Special(SpecialKey.LEFT)), KeySlot("↓", KeyAction.Special(SpecialKey.DOWN)),
-                KeySlot("↑", KeyAction.Special(SpecialKey.UP)), KeySlot("→", KeyAction.Special(SpecialKey.RIGHT)))))
+            listOf(KeySlot("ESC", KeyAction.Special(SpecialKey.ESC)),
+                KeySlot("/", KeyAction.Character("/")), KeySlot("-", KeyAction.Character("-")),
+                KeySlot("PGUP", KeyAction.Special(SpecialKey.PAGE_UP)), KeySlot("↑", KeyAction.Special(SpecialKey.UP)),
+                KeySlot("PGDN", KeyAction.Special(SpecialKey.PAGE_DOWN)), KeySlot("SHIFT", KeyAction.Modifier(ModifierKey.SHIFT))),
+            listOf(KeySlot("TAB", KeyAction.Special(SpecialKey.TAB)), KeySlot("CTRL", KeyAction.Modifier(ModifierKey.CTRL)),
+                KeySlot("ALT", KeyAction.Modifier(ModifierKey.ALT)), KeySlot("←", KeyAction.Special(SpecialKey.LEFT)),
+                KeySlot("↓", KeyAction.Special(SpecialKey.DOWN)), KeySlot("→", KeyAction.Special(SpecialKey.RIGHT)),
+                KeySlot("键盘", KeyAction.ToggleKeyboard))))
     }
 }
 
 /** Physical toolbar dimensions, independent of the terminal's font size. */
-data class KeyboardSizing(val rowHeight: Int = 38, val keyWidth: Int = 48, val textSize: Int = 12) {
-    fun validate() { require(rowHeight in 28..56 && keyWidth in 32..80 && textSize in 10..18) }
+data class KeyboardSizing(val rowHeight: Int = 38, val visibleKeys: Int = 7) {
+    fun validate() { require(rowHeight in 28..56 && visibleKeys in 4..12) }
 }
 
 data class KeyPosition(val row: Int, val index: Int)

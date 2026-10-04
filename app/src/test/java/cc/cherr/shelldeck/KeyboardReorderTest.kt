@@ -28,8 +28,8 @@ class KeyboardReorderTest {
     }
     @Test fun sizingHasCompactDefaultAndValidatedLimits() {
         assertEquals(38, KeyboardSizing().rowHeight)
-        KeyboardSizing(28, 32, 10).validate()
-        KeyboardSizing(56, 80, 18).validate()
+        KeyboardSizing(28, 4).validate()
+        KeyboardSizing(56, 12).validate()
         assertThrows(IllegalArgumentException::class.java) { KeyboardSizing(10).validate() }
     }
 }

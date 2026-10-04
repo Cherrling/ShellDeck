@@ -13,13 +13,15 @@ import java.util.concurrent.TimeUnit
 
 /** Process-owned sessions; the foreground service can retain them without an Activity. Main thread only. */
 class SessionManager(private val application: Application, private val dao: StoreDao, private val vault: CredentialVault, private val changed: () -> Unit = {}) {
+    // Append in connection creation order; switching sessions never reorders this list.
     val sessions = mutableStateListOf<SessionConnection>()
+    private var nextSessionNumber = 1L
     var selectedId by mutableStateOf<String?>(null); private set
     val selected get() = sessions.firstOrNull { it.id == selectedId }
     val activeCount get() = sessions.count { !it.ended }
     fun connect(host: HostRecord, secret: String) {
         selected?.terminal?.leave()
-        val connection = SessionConnection(application, host, dao, vault, secret, changed)
+        val connection = SessionConnection(application, host, dao, vault, secret, nextSessionNumber++, changed)
         sessions.add(connection); selectedId = connection.id; changed()
     }
     fun select(id: String) { require(sessions.any { it.id == id }); selected?.terminal?.leave(); selectedId = id }
@@ -32,7 +34,7 @@ class SessionManager(private val application: Application, private val dao: Stor
     fun closeAll() { sessions.toList().forEach { close(it.id) } }
 }
 
-class SessionConnection(application: Application, val host: HostRecord, dao: StoreDao, vault: CredentialVault, secret: String, private val changed: () -> Unit = {}) {
+class SessionConnection(application: Application, val host: HostRecord, dao: StoreDao, vault: CredentialVault, secret: String, val number: Long, private val changed: () -> Unit = {}) {
     val id: String = UUID.randomUUID().toString()
     private val main = Handler(Looper.getMainLooper())
     private var disposed = false

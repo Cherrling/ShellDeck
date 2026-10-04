@@ -41,13 +41,18 @@ class MultiSessionDeviceTest {
             waitFor("two independently pending fingerprint prompts") { manager.sessions.size == 2 && manager.sessions.all { it.challenge != null } }
             lateinit var first: SessionConnection; lateinit var second: SessionConnection
             main { first = manager.sessions[0]; second = manager.sessions[1]; first.trust(TrustDecision.ONCE); second.trust(TrustDecision.ONCE) }
+            main {
+                assertEquals(1L, first.number); assertEquals(2L, second.number)
+                manager.select(first.id)
+                assertEquals(listOf(first.id, second.id), manager.sessions.map { it.id })
+            }
             waitFor("both connections authenticated") { first.terminal.session.isReady && second.terminal.session.isReady }
             main { manager.home(); assertNull(manager.selected); first.terminal.session.write("printf '\\110\\111\\104\\104\\105\\116\\137\\117\\113\\n'\r") }
             waitFor("hidden terminal keeps parsing output") { first.terminal.session.emulator.screen.transcriptText.contains("HIDDEN_OK") }
             main { manager.select(second.id); manager.close(first.id); assertEquals(second.id, manager.selectedId); assertTrue(second.terminal.session.isReady) }
             main { manager.connect(host, "") }
             waitFor("third connection waiting for its own fingerprint") { manager.selected?.challenge != null }
-            main { val third = manager.selected!!; manager.close(third.id); assertTrue(third.ended); assertTrue(second.terminal.session.isReady) }
+            main { val third = manager.selected!!; assertEquals(3L, third.number); assertEquals(2L, second.number); manager.close(third.id); assertTrue(third.ended); assertTrue(second.terminal.session.isReady) }
             main { manager.select(second.id); assertEquals(1, manager.sessions.size) }
         } finally { main { manager.closeAll() }; db.close() }
     }

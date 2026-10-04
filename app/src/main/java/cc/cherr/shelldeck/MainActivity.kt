@@ -132,7 +132,15 @@ private fun ShellDeckApp(model: ShellDeckModel, activity: MainActivity) {
         if (terminal?.hideKeyboardIfVisible() != true) { manager.home(); page = MainPage.SESSIONS }
     }
     BackHandler(terminal == null && showIdentities) { showIdentities = false }
-    Scaffold(containerColor = background, contentColor = foreground, bottomBar = {
+    Scaffold(containerColor = background, contentColor = foreground, floatingActionButton = {
+        if (terminal == null && !editingKeyboard && !model.busy && (page == MainPage.HOSTS || showIdentities)) {
+            FloatingActionButton(onClick = {
+                if (showIdentities) importing = true else { editing = null; hostEditor = true }
+            }) {
+                Icon(painterResource(R.drawable.ic_add), contentDescription = if (showIdentities) "导入 SSH Key" else "添加服务器")
+            }
+        }
+    }, bottomBar = {
         if (terminal == null && !editingKeyboard) NavigationBar(Modifier.testTag("main-navigation")) {
             MainPage.entries.forEach { item -> NavigationBarItem(
                 selected = page == item, onClick = { page = item; showIdentities = false },
@@ -156,26 +164,31 @@ private fun ShellDeckApp(model: ShellDeckModel, activity: MainActivity) {
                 ExtraKeysBar(model.settings.keyboard, terminal, model.settings.keyboardSizing)
             } else {
                 Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                    if (showIdentities) TextButton(onClick = { showIdentities = false }) { Text("返回") }
                     Text(if (showIdentities) "SSH 身份与密钥" else if (page == MainPage.SESSIONS) "活动会话" else page.label,
-                        Modifier.padding(16.dp), style = MaterialTheme.typography.headlineMedium)
-                }
-                Row {
-                    if (page == MainPage.HOSTS) TextButton(enabled = !model.busy, onClick = { editing = null; hostEditor = true }) { Text("添加服务器") }
-                    if (showIdentities) TextButton(enabled = !model.busy, onClick = { importing = true }) { Text("导入 SSH Key") }
+                        Modifier.padding(16.dp), style = if (showIdentities) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineMedium)
                 }
                 if (model.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
-                LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp,
+                    bottom = if (page == MainPage.HOSTS || showIdentities) 96.dp else 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     if (page == MainPage.SESSIONS) {
                     if (manager.sessions.isEmpty()) item { Text("还没有会话，从服务器页面开始连接。") }
                     items(manager.sessions, key = { "session:${it.id}" }) { session ->
-                        OutlinedCard(Modifier.fillMaxWidth()) {
-                            Column(Modifier.padding(12.dp)) {
-                                Text("${session.host.label} · ${session.id.take(4)}")
-                                Text(if (session.challenge != null) "等待确认服务器指纹" else session.status)
-                                Row {
-                                    TextButton(onClick = { manager.select(session.id) }) { Text(if (session.ended) "查看终端" else "打开") }
-                                    TextButton(onClick = { closing = session.id }) { Text("关闭连接") }
+                        OutlinedCard(onClick = { manager.select(session.id) },
+                            modifier = Modifier.fillMaxWidth().testTag("session-${session.id}")) {
+                            Row(Modifier.padding(start = 12.dp, top = 8.dp, end = 4.dp, bottom = 8.dp),
+                                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text("${session.host.label} · 会话 ${session.number}", style = MaterialTheme.typography.titleMedium,
+                                        maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                                    Text(when {
+                                        session.challenge != null -> "等待确认服务器指纹"
+                                        session.ended || session.status != "已连接" -> session.status
+                                        else -> session.terminal.title.ifBlank { session.status }
+                                    }, style = MaterialTheme.typography.bodyMedium, maxLines = 1,
+                                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                                }
+                                IconButton(onClick = { closing = session.id }, modifier = Modifier.testTag("close-session-${session.id}")) {
+                                    Icon(painterResource(R.drawable.ic_close), contentDescription = "关闭 ${session.host.label} 的会话 ${session.number}")
                                 }
                             }
                         }

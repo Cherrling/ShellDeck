@@ -3,6 +3,7 @@ package cc.cherr.shelldeck
 import android.app.Application
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import android.graphics.Typeface
 import android.view.KeyEvent
@@ -17,6 +18,7 @@ import com.termux.view.TerminalViewClient
 class TerminalController(private val app: Application, private val finished: () -> Unit) : TerminalSessionClient, TerminalViewClient {
     lateinit var session: TerminalSession
     val modifiers = ModifierState()
+    var title by mutableStateOf(""); private set
     var backgroundColor by mutableIntStateOf(TerminalColors.COLOR_SCHEME.mDefaultColors[TextStyle.COLOR_INDEX_BACKGROUND]); private set
     var foregroundColor by mutableIntStateOf(TerminalColors.COLOR_SCHEME.mDefaultColors[TextStyle.COLOR_INDEX_FOREGROUND]); private set
     private var face: Typeface = Typeface.MONOSPACE
@@ -93,7 +95,9 @@ class TerminalController(private val app: Application, private val finished: () 
     override fun onTextChanged(changedSession: TerminalSession) {
         terminalView?.onScreenUpdated()
     }
-    override fun onTitleChanged(changedSession: TerminalSession) = Unit
+    override fun onTitleChanged(changedSession: TerminalSession) {
+        title = changedSession.title.orEmpty().filterNot { it.isISOControl() }.trim().take(256)
+    }
     override fun onSessionFinished(finishedSession: TerminalSession) = finished()
     override fun onCopyTextToClipboard(session: TerminalSession, text: String?) {
         val clipboard = app.getSystemService(android.content.ClipboardManager::class.java)

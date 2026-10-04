@@ -10,20 +10,20 @@ import org.junit.Test
 
 class SettingsUiDeviceTest {
     @get:Rule val ui = createAndroidComposeRule<MainActivity>()
-    @Test fun keySizePresetsAndSliderPersistAcrossRecreation() {
+    @Test fun keyHeightAndVisibleCountPersistAcrossRecreation() {
         lateinit var model: ShellDeckModel
         ui.runOnUiThread { model = ViewModelProvider(ui.activity)[ShellDeckModel::class.java] }
         val original = model.settings
         try {
             ui.onNodeWithText("设置").performClick()
-            ui.onNodeWithText("宽松", substring = false).performScrollTo().performClick()
-            ui.runOnIdle { assertEquals(cc.cherr.shelldeck.keyboard.KeyboardSizing(48, 64, 14), model.settings.keyboardSizing) }
+            ui.onNodeWithTag("key-count-slider").performScrollTo().performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.SetProgress) { it(9f) }
+            ui.runOnIdle { assertEquals(9, model.settings.keyboardSizing.visibleKeys) }
             ui.onNodeWithTag("key-height-slider").performScrollTo().performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.SetProgress) { it(32f) }
             ui.runOnIdle { assertEquals(32, model.settings.keyboardSizing.rowHeight) }
             ui.activityRule.scenario.recreate()
             ui.onNodeWithText("行高：32 dp").performScrollTo().assertIsDisplayed()
-            ui.onNodeWithText("紧凑", substring = false).performScrollTo().performClick()
-            ui.runOnIdle { assertEquals(cc.cherr.shelldeck.keyboard.KeyboardSizing(), model.settings.keyboardSizing) }
+            ui.onNodeWithText("每行显示：9 个").performScrollTo().assertIsDisplayed()
+            ui.runOnIdle { assertEquals(9, model.settings.keyboardSizing.visibleKeys) }
         } finally { ui.runOnUiThread { model.updateSettings(original) } }
     }
     @Test fun editSaveRecreateAndCancelKeepExpectedSettings() {
@@ -42,7 +42,7 @@ class SettingsUiDeviceTest {
             ui.onNodeWithText("退出键", substring = false).assertExists()
             ui.onNodeWithText("确定", substring = false).performClick()
             val from = ui.onNodeWithText("退出键", substring = false).fetchSemanticsNode().boundsInRoot.center
-            val next = ui.onNodeWithText("CTRL", substring = false).fetchSemanticsNode().boundsInRoot
+            val next = ui.onNodeWithText("-", substring = false).fetchSemanticsNode().boundsInRoot
             ui.onRoot().performTouchInput {
                 down(from); advanceEventTime(650); moveTo(androidx.compose.ui.geometry.Offset(next.right - 2, next.center.y), delayMillis = 100); up()
             }
@@ -55,7 +55,8 @@ class SettingsUiDeviceTest {
             ui.activityRule.scenario.recreate()
             ui.onNodeWithText("编辑快捷键布局").performScrollTo().performClick()
             ui.onNodeWithText("恢复默认布局（保存后生效）").performClick()
-            ui.onNodeWithText("返回", substring = false).performClick()
+            ui.waitForIdle()
+            androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
             ui.onNodeWithText("放弃", substring = false).performClick()
             ui.runOnIdle { assertEquals("退出键", model.settings.keyboard.rows[0][2].label) }
         } finally { ui.runOnUiThread { model.updateSettings(original) } }

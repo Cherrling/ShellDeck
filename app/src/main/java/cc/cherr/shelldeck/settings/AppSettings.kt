@@ -25,7 +25,7 @@ class SettingsStore(context: Context) {
             TerminalPalette.valueOf(root.optString("palette", "DARK")),
             root.optJSONArray("keyboard")?.let(::decodeKeyboard) ?: KeyboardProfile.default(),
             root.optJSONObject("keyboardSizing")?.let {
-                KeyboardSizing(it.optInt("height", 38).coerceIn(28, 56), it.optInt("width", 48).coerceIn(32, 80), it.optInt("text", 12).coerceIn(10, 18))
+                KeyboardSizing(it.optInt("height", 38).coerceIn(28, 56), it.optInt("visibleKeys", 7).coerceIn(4, 12))
             } ?: KeyboardSizing(),
             BackgroundMode.entries.firstOrNull { it.name == root.optString("backgroundMode") } ?: BackgroundMode.NORMAL)
     } catch (_: Exception) { AppSettings() }
@@ -37,7 +37,7 @@ class SettingsStore(context: Context) {
             .put("font", settings.fontId).put("size", settings.fontSize).put("palette", settings.palette.name)
             .put("backgroundMode", settings.backgroundMode.name)
             .put("keyboard", encodeKeyboard(settings.keyboard))
-            .put("keyboardSizing", JSONObject().put("height", settings.keyboardSizing.rowHeight).put("width", settings.keyboardSizing.keyWidth).put("text", settings.keyboardSizing.textSize))
+            .put("keyboardSizing", JSONObject().put("height", settings.keyboardSizing.rowHeight).put("visibleKeys", settings.keyboardSizing.visibleKeys))
         prefs.edit { putString("settings", root.toString()) }
     }
     companion object {

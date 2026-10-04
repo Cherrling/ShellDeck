@@ -19,27 +19,24 @@ import kotlin.math.roundToInt
 internal fun KeyboardSizeSettings(profile: KeyboardProfile, saved: KeyboardSizing, save: (KeyboardSizing) -> Unit) {
     var size by remember(saved) { mutableStateOf(saved) }
     Text("快捷键大小", style = MaterialTheme.typography.titleMedium)
-    Row {
-        TextButton(onClick = { size = KeyboardSizing(); save(size) }) { Text("紧凑") }
-        TextButton(onClick = { size = KeyboardSizing(48, 64, 14); save(size) }) { Text("宽松") }
-    }
     Text("行高：${size.rowHeight} dp")
     Slider(size.rowHeight.toFloat(), { size = size.copy(rowHeight = it.roundToInt()) }, valueRange = 28f..56f, steps = 27,
         onValueChangeFinished = { save(size) }, modifier = Modifier.testTag("key-height-slider"))
-    Text("按键宽度：${size.keyWidth} dp")
-    Slider(size.keyWidth.toFloat(), { size = size.copy(keyWidth = it.roundToInt()) }, valueRange = 32f..80f, steps = 47,
-        onValueChangeFinished = { save(size) }, modifier = Modifier.testTag("key-width-slider"))
-    Text("按键文字：${size.textSize} sp")
-    Slider(size.textSize.toFloat(), { size = size.copy(textSize = it.roundToInt()) }, valueRange = 10f..18f, steps = 7,
-        onValueChangeFinished = { save(size) }, modifier = Modifier.testTag("key-text-slider"))
+    Text("每行显示：${size.visibleKeys} 个")
+    Slider(size.visibleKeys.toFloat(), { size = size.copy(visibleKeys = it.roundToInt()) }, valueRange = 4f..12f, steps = 7,
+        onValueChangeFinished = { save(size) }, modifier = Modifier.testTag("key-count-slider"))
+    Text("超出的按键可左右滑动；加宽按键按所占格数计算。", style = MaterialTheme.typography.bodySmall)
     Text("预览（可左右滑动）", style = MaterialTheme.typography.bodySmall)
-    Surface(tonalElevation = 2.dp) {
-        Column(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).testTag("key-size-preview")) {
-            profile.rows.forEach { row -> Row {
-                row.forEach { key -> Box(Modifier.width((size.keyWidth * key.width).dp).height(size.rowHeight.dp), contentAlignment = Alignment.Center) {
-                    Text(key.label, Modifier.padding(horizontal = 2.dp), fontSize = size.textSize.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val keyWidth = with(androidx.compose.ui.platform.LocalDensity.current) { (constraints.maxWidth / size.visibleKeys).toDp() }
+        Surface(tonalElevation = 2.dp) {
+            Column(Modifier.width(keyWidth * size.visibleKeys).horizontalScroll(rememberScrollState()).testTag("key-size-preview")) {
+                profile.rows.forEach { row -> Row {
+                    row.forEach { key -> Box(Modifier.width(keyWidth * key.width).height(size.rowHeight.dp), contentAlignment = Alignment.Center) {
+                        Text(key.label, Modifier.padding(horizontal = 2.dp), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    } }
                 } }
-            } }
+            }
         }
     }
 }

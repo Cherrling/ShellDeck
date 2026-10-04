@@ -33,12 +33,18 @@ class ExtraKeysGestureDeviceTest {
             terminal.session = TerminalSession(transport, 100, terminal)
             ui.activity.setContent { ShellDeckTheme { Column(Modifier.fillMaxSize()) {
                 AndroidView(factory = terminal::createView, modifier = Modifier.weight(1f), onRelease = terminal::releaseView)
-                ExtraKeysBar(KeyboardProfile.default(), terminal, KeyboardSizing(28, 40, 10))
+                val defaults = KeyboardProfile.default()
+                val overflow = defaults.copy(rows = listOf(defaults.rows[0] + KeySlot("EXTRA", KeyAction.Macro("extra")), defaults.rows[1]))
+                ExtraKeysBar(overflow, terminal, KeyboardSizing(28, 7))
             } } }
         }
         try {
             ui.waitUntil(5000) { terminal.session.isReady }
             ui.onNodeWithTag("extra-keys-bar").assertHeightIsEqualTo(56.dp)
+            ui.onNodeWithText("EXTRA").assertIsNotDisplayed()
+            val bar = ui.onNodeWithTag("extra-keys-bar").fetchSemanticsNode().boundsInRoot
+            val shiftBounds = ui.onNodeWithContentDescription("SHIFT").fetchSemanticsNode().boundsInRoot
+            assertEquals((bar.width.toInt() / 7).toFloat(), shiftBounds.width, 1f)
             val shift = ui.onNodeWithContentDescription("SHIFT").fetchSemanticsNode().boundsInRoot.center
             val tab = ui.onNodeWithText("TAB").fetchSemanticsNode().boundsInRoot.center
             ui.onRoot().performTouchInput {
@@ -52,6 +58,7 @@ class ExtraKeysGestureDeviceTest {
                 down(shift); moveTo(Offset(shift.x - 180f, shift.y), delayMillis = 100); up()
             }
             ui.runOnIdle { assertFalse(terminal.modifiers.active(ModifierKey.SHIFT)) }
+            ui.onNodeWithText("EXTRA").assertIsDisplayed()
         } finally { ui.runOnUiThread { terminal.close() } }
     }
 }
