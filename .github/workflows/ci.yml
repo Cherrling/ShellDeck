@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5
+        with:
+          cache-read-only: ${{ github.event_name == 'pull_request' || github.ref != 'refs/heads/main' }}
+      - name: Locate Android SDK
+        id: sdk
+        run: echo "root=$ANDROID_HOME" >> "$GITHUB_OUTPUT"
+      - name: Restore Android SDK packages
+        id: sdk-cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ${{ steps.sdk.outputs.root }}/platforms/android-36
+            ${{ steps.sdk.outputs.root }}/build-tools/35.0.0
+          key: android-sdk-${{ runner.os }}-platform36-buildtools35-v1
+      - name: Install Android SDK packages
+        run: sdkmanager 'platforms;android-36' 'build-tools;35.0.0' 'platform-tools'
+      - name: Prepare isolated SSH integration tests
+        run: |
+          command -v sshd || (sudo apt-get update && sudo apt-get install -y openssh-server)
+          sudo mkdir -p /run/sshd
+      - name: Check release metadata and validation logic
+        run: |
+          python3 scripts/check_termux.py
+          python3 scripts/release.py validate
+          python3 -m unittest discover -s scripts -p 'test_*.py'
+      - name: Lint, test and build debug APK
+        run: SSH_TEST_SUDO=1 python3 scripts/ssh_test_server.py -- ./gradlew --no-daemon :app:lintDebug :app:testDebugUnitTest :terminal-emulator:testDebugUnitTest :app:assembleDebug
+      - name: Save Android SDK packages
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && steps.sdk-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ${{ steps.sdk.outputs.root }}/platforms/android-36
+            ${{ steps.sdk.outputs.root }}/build-tools/35.0.0
+          key: android-sdk-${{ runner.os }}-platform36-buildtools35-v1
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ShellDeck-debug-${{ github.sha }}
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 14
