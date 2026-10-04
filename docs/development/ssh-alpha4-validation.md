@@ -16,8 +16,10 @@
 - 无口令密钥的口令回调次数为 0，加密密钥为 1；取消、无效格式、错误口令、未授权 key 和服务器指纹拒绝仍被拒绝。
 - 149 个终端测试通过；Termux 来源检查通过，48 个上游文件未修改。
 - API 35 模拟器 3 个设备测试通过。新增真实 IME 测试通过实际 TerminalView / TerminalSession 统计传输边界，三轮 show/hide 每次恰好一次 resize，收起后恢复原始 rows。
+- 对照实验：只在临时副本将目标 insets 恢复为旧的动画 insets，同一设备测试失败：初始尺寸之外，单次展开键盘产生 10 次 PTY resize（累计 11 条，期望 2 条）。恢复修复版本后全部 3 个设备测试再次通过。
 - Android 上 OpenSSH Ed25519、RSA PEM、Ed25519 / RSA PKCS#8 导入和签名验签通过，并断言无口令样例不会请求口令。真实 Keystore / Room 测试继续通过。
 - Debug 构建、lint、Python 发布校验通过。测试工具链和产物位于本地内存盘，未在 NFS 上构建。
+- 修复 commit d1fa11b 的 [云端 CI](https://github.com/Cherrling/ShellDeck/actions/runs/37231393340) 通过。
 
 ## 真机复测
 
@@ -28,3 +30,7 @@
 - [SSHJ v0.40.0 PKCS8KeyFile](https://github.com/hierynomus/sshj/blob/v0.40.0/src/main/java/net/schmizz/sshj/userauth/keyprovider/PKCS8KeyFile.java)
 - [BC 1.86 OpenSSHPrivateKeyUtil](https://github.com/bcgit/bc-java/blob/r1rv86/core/src/main/java/org/bouncycastle/crypto/util/OpenSSHPrivateKeyUtil.java)
 - [Android IME insets](https://developer.android.com/develop/ui/compose/system/insets)
+
+## 发布产物
+
+[alpha.4 Release](https://github.com/Cherrling/ShellDeck/releases/tag/v0.1.0-alpha.4) 已由 [GitHub Actions](https://github.com/Cherrling/ShellDeck/actions/runs/37231565790) 自动签名发布。下载后的 APK 与源码校验和通过，包名、版本及既有发布证书检查通过。API 35 模拟器从正式 alpha.3 覆盖安装 alpha.4 成功并启动正常。
