@@ -48,18 +48,21 @@ class SessionConnection(application: Application, val host: HostRecord, dao: Sto
     val status get() = state.message
     val connected get() = state == ConnectionState.CONNECTED && !ended
     var challenge by mutableStateOf<HostChallenge?>(null); private set
+    var requestingPassword by mutableStateOf(false); private set
     var passphraseIdentity by mutableStateOf<String?>(null); private set
     private var pendingTrust: CompletableFuture<TrustDecision>? = null
     private var pendingPassphrase: CompletableFuture<CharArray?>? = null
     private val password = secret.toCharArray()
     val terminal = TerminalController(application) { finish() }
     private lateinit var transport: SshTransport
+    val tunnels by lazy { TunnelController { local, host, port -> transport.openTunnel(local, host, port) } }
     val files by lazy { cc.cherr.shelldeck.sftp.SftpController(application) { transport.openSftp() } }
     init {
-        val verifier = HostTrust(host.hostname, host.port,
-            read = { dao.knownHost(host.hostname, host.port)?.let { HostPin(it.algorithm, it.fingerprint) } },
+        fun hop(endpoint: HostRecord): SshHop {
+        val verifier = HostTrust(endpoint.hostname, endpoint.port,
+            read = { dao.knownHost(endpoint.hostname, endpoint.port)?.let { HostPin(it.algorithm, it.fingerprint) } },
             save = { pin -> dao.saveKnownHost(KnownHostRecord().apply {
-                hostname = host.hostname; port = host.port; algorithm = pin.algorithm; fingerprint = pin.fingerprint
+                hostname = endpoint.hostname; port = endpoint.port; algorithm = pin.algorithm; fingerprint = pin.fingerprint
             }) },
             ask = { request ->
                 val future = CompletableFuture<TrustDecision>()
@@ -74,36 +77,56 @@ class SessionConnection(application: Application, val host: HostRecord, dao: Sto
                     main.post { if (pendingTrust === future) { pendingTrust = null; challenge = null } }
                 }
             })
-        transport = SshTransport(host.hostname, host.port, host.username, verifier,
+        return SshHop(endpoint.hostname, endpoint.port, verifier,
             authenticate = { client ->
                 try {
-                    val identityId = host.identityId
-                    if (identityId == null) client.authPassword(host.username, password)
+                    val identityId = endpoint.identityId
+                    if (identityId == null) {
+                        val value = if (endpoint.id == host.id) password else requestSecret(endpoint.label, true)
+                        try { client.authPassword(endpoint.username, value) } finally { value.fill('\u0000') }
+                    }
                     else {
                         val identity = requireNotNull(dao.identity(identityId))
                         val bytes = vault.decrypt(identity.id, identity.encryptedKey)
                         try {
                             val key = SshKeys.loadWithPassphraseRequest(client, bytes) {
-                                val future = CompletableFuture<CharArray?>()
-                                main.post {
-                                    if (disposed || ended || future.isDone) future.complete(null)
-                                    else { pendingPassphrase = future; passphraseIdentity = identity.label; state = ConnectionState.PASSPHRASE }
-                                }
-                                try { future.get(90, TimeUnit.SECONDS) }
-                                catch (_: Exception) { future.complete(null); future.getNow(null)?.fill('\u0000'); null }
-                                finally {
-                                    future.complete(null)
-                                    main.post { if (pendingPassphrase === future) { pendingPassphrase = null; passphraseIdentity = null } }
-                                }
+                                requestSecret("${endpoint.label} · ${identity.label}", false)
                             }
-                            client.authPublickey(host.username, key)
+                            client.authPublickey(endpoint.username, key)
                         } finally { bytes.fill(0) }
                     }
-                } finally { password.fill('\u0000') }
-            }, startupCommand = host.startupCommand, status = { value -> main.post { if (!disposed && !ended && !state.terminal) state = value } })
+                } finally { if (endpoint.id == host.id) password.fill('\u0000') }
+            })
+        }
+        transport = SshTransport(host.hostname, host.port, host.username,
+            object : net.schmizz.sshj.transport.verification.HostKeyVerifier {
+                override fun verify(h: String, p: Int, key: java.security.PublicKey) = false
+                override fun findExistingAlgorithms(h: String, p: Int): List<String> = emptyList()
+            }, {},
+            status = { value -> main.post { if (!disposed && !ended && !state.terminal) state = value } },
+            startupCommand = host.startupCommand,
+            route = { jumpRoute(host, dao::host).map(::hop) },
+            keepAliveSeconds = cc.cherr.shelldeck.settings.SettingsStore(application).read().keepAliveSeconds)
         terminal.session = TerminalSession(transport, 5000, terminal)
         // Start independently of composition; a quick navigation must not leave an unstarted connection.
         terminal.session.updateSize(80, 24, 8, 16)
+    }
+    private fun requestSecret(label: String, isPassword: Boolean): CharArray {
+        val future = CompletableFuture<CharArray?>()
+        main.post {
+            if (disposed || ended || future.isDone) future.complete(null)
+            else { pendingPassphrase = future; requestingPassword = isPassword
+                passphraseIdentity = label; state = ConnectionState.PASSPHRASE }
+        }
+        try { return requireNotNull(future.get(90, TimeUnit.SECONDS)) { "Authentication cancelled" } }
+        catch (failure: Exception) {
+            future.complete(null); future.getNow(null)?.fill('\u0000'); throw failure
+        }
+        finally {
+            // If cancellation wins, a late UI reply is wiped by submitPassphrase.
+            future.complete(null)
+            main.post { if (pendingPassphrase === future) { pendingPassphrase = null; passphraseIdentity = null } }
+        }
     }
     fun trust(decision: TrustDecision) {
         if (pendingTrust?.complete(decision) == true) state = if (decision == TrustDecision.CANCEL) ConnectionState.CANCELLED else ConnectionState.CONNECTING
@@ -116,7 +139,7 @@ class SessionConnection(application: Application, val host: HostRecord, dao: Sto
     }
     private fun finish() {
         if (ended) return
-        files.close()
+        files.close(); tunnels.close()
         ended = true; if (!state.terminal) state = ConnectionState.ENDED; password.fill('\u0000')
         pendingTrust?.complete(TrustDecision.CANCEL); pendingTrust = null; challenge = null
         pendingPassphrase?.complete(null); pendingPassphrase = null; passphraseIdentity = null

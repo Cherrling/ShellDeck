@@ -20,6 +20,7 @@ sealed interface KeyAction {
     data class Modifier(val key: ModifierKey) : KeyAction
     data class EscapeSequence(val sequence: String) : KeyAction
     data class Macro(val text: String) : KeyAction
+    data object OpenPrompt : KeyAction
     data object ToggleKeyboard : KeyAction
 }
 data class KeySlot(val label: String, val action: KeyAction, val width: Int = 1)

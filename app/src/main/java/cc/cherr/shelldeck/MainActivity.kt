@@ -109,6 +109,7 @@ private fun ShellDeckApp(model: ShellDeckModel, activity: MainActivity) {
     var addingIdentity by remember { mutableStateOf(false) }
     var generating by remember { mutableStateOf(false) }
     var login by remember { mutableStateOf<HostRecord?>(null) }
+    var tunnelSession by rememberSaveable { mutableStateOf<String?>(null) }
     var filesSession by rememberSaveable { mutableStateOf<String?>(null) }
     var closing by remember { mutableStateOf<String?>(null) }
     var page by rememberSaveable { mutableStateOf(MainPage.HOSTS) }
@@ -134,7 +135,7 @@ private fun ShellDeckApp(model: ShellDeckModel, activity: MainActivity) {
         }
     }
     val volumeChangesFont = terminal != null && closing == null &&
-        connection?.challenge == null && connection?.passphraseIdentity == null && model.error == null
+        connection?.challenge == null && connection?.passphraseIdentity == null && terminal?.promptVisible != true && model.error == null
     DisposableEffect(activity, volumeChangesFont) {
         activity.onTerminalFontSizeChange = if (volumeChangesFont) model::adjustFontSize else null
         onDispose { activity.onTerminalFontSizeChange = null }
@@ -212,8 +213,18 @@ private fun ShellDeckApp(model: ShellDeckModel, activity: MainActivity) {
                                     }, style = MaterialTheme.typography.bodyMedium, maxLines = 1,
                                         overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                                 }
-                                IconButton(enabled = session.connected, onClick = { filesSession = session.id }) {
-                                    Icon(painterResource(R.drawable.ic_folder), contentDescription = "浏览 ${session.host.label} 的文件")
+                                var sessionMenu by remember { mutableStateOf(false) }
+                                Box {
+                                    IconButton(enabled = session.connected, onClick = { sessionMenu = true }) {
+                                        Icon(painterResource(R.drawable.ic_more_vert), "${session.host.label} 的会话工具")
+                                    }
+                                    DropdownMenu(sessionMenu, onDismissRequest = { sessionMenu = false }) {
+                                        DropdownMenuItem(text = { Text("浏览文件") }, onClick = { sessionMenu = false; filesSession = session.id })
+                                        DropdownMenuItem(text = { Text("端口转发") }, onClick = { sessionMenu = false; tunnelSession = session.id })
+                                        DropdownMenuItem(text = { Text("Prompt 编辑器") }, onClick = {
+                                            sessionMenu = false; manager.select(session.id); session.terminal.promptVisible = true
+                                        })
+                                    }
                                 }
                                 IconButton(onClick = { closing = session.id }, modifier = Modifier.testTag("close-session-${session.id}")) {
                                     Icon(painterResource(R.drawable.ic_close), contentDescription = "关闭 ${session.host.label} 的会话 ${session.number}")
@@ -283,12 +294,18 @@ private fun ShellDeckApp(model: ShellDeckModel, activity: MainActivity) {
             }
         }
     }
+    manager.sessions.firstOrNull { it.id == tunnelSession }?.let { session ->
+        cc.cherr.shelldeck.ssh.TunnelScreen(session) { tunnelSession = null }
+    }
     manager.sessions.firstOrNull { it.id == filesSession }?.let { session ->
         cc.cherr.shelldeck.sftp.SftpScreen(session) { filesSession = null }
     }
-    terminal?.let { cc.cherr.shelldeck.terminal.PasteDialog(it) }
-    if (hostEditor) HostEditor(editing, model.identities, onDismiss = { hostEditor = false }) { label, hostname, port, username, identity, startup ->
-        if (model.saveHost(editing?.id, label, hostname, port, username, identity, startup)) hostEditor = false
+    terminal?.let {
+        cc.cherr.shelldeck.terminal.PasteDialog(it)
+        cc.cherr.shelldeck.terminal.PromptEditor(it)
+    }
+    if (hostEditor) HostEditor(editing, model.identities, model.hosts, onDismiss = { hostEditor = false }) { label, hostname, port, username, identity, startup, jump ->
+        if (model.saveHost(editing?.id, label, hostname, port, username, identity, startup, jump)) hostEditor = false
     }
     if (addingIdentity) AlertDialog(onDismissRequest = { addingIdentity = false }, title = { Text("添加 SSH Key") },
         text = { Column {
@@ -312,10 +329,10 @@ private fun ShellDeckApp(model: ShellDeckModel, activity: MainActivity) {
     connection?.takeUnless { showSettings }?.passphraseIdentity?.let { identity ->
         var secret by remember(identity) { mutableStateOf("") }
         AlertDialog(properties = DialogProperties(securePolicy = SecureFlagPolicy.SecureOn),
-            onDismissRequest = { secret = ""; manager.close(connection!!.id) }, title = { Text("解锁私钥") },
+            onDismissRequest = { secret = ""; manager.close(connection!!.id) }, title = { Text(if (connection!!.requestingPassword) "跳板机登录" else "解锁私钥") },
             text = { Column {
-                Text("$identity 使用了加密私钥。请输入口令，仅用于本次连接，不会保存。")
-                OutlinedTextField(secret, { secret = it }, label = { Text("Passphrase") }, singleLine = true,
+                Text(if (connection!!.requestingPassword) "$identity：请输入登录密码，仅用于本次连接，不会保存。" else "$identity 使用了加密私钥。请输入口令，仅用于本次连接，不会保存。")
+                OutlinedTextField(secret, { secret = it }, label = { Text(if (connection!!.requestingPassword) "密码" else "Passphrase") }, singleLine = true,
                     visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password))
             } },
             confirmButton = { TextButton(onClick = { connection!!.submitPassphrase(secret); secret = "" }) { Text("连接") } },
@@ -353,12 +370,13 @@ private fun ConfirmDialog(title: String, message: String, dismiss: () -> Unit, c
 }
 
 @Composable
-private fun HostEditor(host: HostRecord?, identities: List<IdentityRecord>, onDismiss: () -> Unit,
-    save: (String, String, String, String, String?, String) -> Unit) {
+private fun HostEditor(host: HostRecord?, identities: List<IdentityRecord>, hosts: List<HostRecord>, onDismiss: () -> Unit,
+    save: (String, String, String, String, String?, String, String?) -> Unit) {
     var label by remember { mutableStateOf(host?.label ?: "") }
     var hostname by remember { mutableStateOf(host?.hostname ?: "") }
     var port by remember { mutableStateOf(host?.port?.toString() ?: "22") }
     var username by remember { mutableStateOf(host?.username ?: "root") }
+    var jump by remember { mutableStateOf(host?.jumpHostId) }
     var startup by remember { mutableStateOf(host?.startupCommand ?: "") }
     var identity by remember { mutableStateOf(if (host != null) host.identityId else identities.firstOrNull()?.id) }
     AlertDialog(onDismissRequest = onDismiss, title = { Text(if (host == null) "添加服务器" else "编辑服务器") },
@@ -369,12 +387,23 @@ private fun HostEditor(host: HostRecord?, identities: List<IdentityRecord>, onDi
             OutlinedTextField(username, { username = it }, label = { Text("用户名") }, singleLine = true)
             OutlinedTextField(startup, { startup = it }, label = { Text("启动命令（可留空）") }, singleLine = true,
                 supportingText = { Text("每次新建连接时执行一次，例如 tmux new-session -A -s codex") })
+            Text("跳板机")
+            var jumpMenu by remember { mutableStateOf(false) }
+            Box {
+                TextButton(onClick = { jumpMenu = true }) { Text(hosts.firstOrNull { it.id == jump }?.label ?: "直接连接") }
+                DropdownMenu(jumpMenu, onDismissRequest = { jumpMenu = false }) {
+                    DropdownMenuItem(text = { Text("直接连接") }, onClick = { jump = null; jumpMenu = false })
+                    hosts.filter { it.id != host?.id }.forEach { option ->
+                        DropdownMenuItem(text = { Text(option.label) }, onClick = { jump = option.id; jumpMenu = false })
+                    }
+                }
+            }
             Text("认证身份")
             identities.forEach { option ->
                 Row { RadioButton(selected = identity == option.id, onClick = { identity = option.id }); TextButton(onClick = { identity = option.id }) { Text(option.label) } }
             }
             Row { RadioButton(selected = identity == null, onClick = { identity = null }); TextButton(onClick = { identity = null }) { Text("密码登录") } }
-        } }, confirmButton = { TextButton(onClick = { save(label, hostname, port, username, identity, startup) }) { Text("保存") } },
+        } }, confirmButton = { TextButton(onClick = { save(label, hostname, port, username, identity, startup, jump) }) { Text("保存") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } })
 }
 

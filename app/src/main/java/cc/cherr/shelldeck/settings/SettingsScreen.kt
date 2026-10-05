@@ -93,6 +93,15 @@ fun SettingsScreen(model: ShellDeckModel, onIdentities: () -> Unit = {}, onEdito
             model.updateSettings(model.settings.copy(keyboardSizing = it))
         }
         HorizontalDivider()
+        Text("SSH 保活探测（新连接生效）")
+        Row {
+            listOf(0, 60, 120).forEach { seconds ->
+                FilterChip(selected = settings.keepAliveSeconds == seconds,
+                    onClick = { model.updateSettings(settings.copy(keepAliveSeconds = seconds)) },
+                    label = { Text(if (seconds == 0) "关闭" else "${seconds}秒") })
+            }
+        }
+        Text("连续三次探测未获响应后结束连接；不自动重连。关闭可减少空闲网络活动，但失效连接可能更晚被发现。", style = MaterialTheme.typography.bodySmall)
         BackgroundSettings(settings.backgroundMode, model.backgroundError) {
             model.updateSettings(model.settings.copy(backgroundMode = it))
         }
@@ -161,12 +170,12 @@ private fun KeyboardEditor(initial: KeyboardProfile, sizing: KeyboardSizing, can
 
 @Composable
 private fun KeyEditor(initial: KeySlot, canDelete: Boolean, cancel: () -> Unit, save: (KeySlot) -> Unit, delete: () -> Unit) {
-    val types = listOf("字符", "特殊键", "修饰键", "转义序列", "宏", "键盘开关")
+    val types = listOf("字符", "特殊键", "修饰键", "转义序列", "宏", "键盘开关", "Prompt 编辑器")
     var label by rememberSaveable { mutableStateOf(initial.label) }
     var width by rememberSaveable { mutableIntStateOf(initial.width) }
     var type by rememberSaveable { mutableStateOf(when(initial.action) {
         is KeyAction.Character -> "字符"; is KeyAction.Special -> "特殊键"; is KeyAction.Modifier -> "修饰键"
-        is KeyAction.EscapeSequence -> "转义序列"; is KeyAction.Macro -> "宏"; else -> "键盘开关"
+        is KeyAction.EscapeSequence -> "转义序列"; is KeyAction.Macro -> "宏"; KeyAction.OpenPrompt -> "Prompt 编辑器"; else -> "键盘开关"
     }) }
     var text by rememberSaveable { mutableStateOf(when(val a = initial.action) {
         is KeyAction.Character -> a.text; is KeyAction.Macro -> a.text
@@ -180,6 +189,7 @@ private fun KeyEditor(initial: KeySlot, canDelete: Boolean, cancel: () -> Unit, 
     fun editedSlot(): KeySlot {
         val action = when(type) {
             "字符" -> KeyAction.Character(text); "特殊键" -> KeyAction.Special(special, combo)
+            "Prompt 编辑器" -> KeyAction.OpenPrompt
             "修饰键" -> KeyAction.Modifier(modifier); "宏" -> KeyAction.Macro(text)
             "转义序列" -> KeyAction.EscapeSequence(text.replace("\\e", "\u001b")); else -> KeyAction.ToggleKeyboard
         }
@@ -195,6 +205,7 @@ private fun KeyEditor(initial: KeySlot, canDelete: Boolean, cancel: () -> Unit, 
                     Row { ModifierKey.entries.forEach { m -> FilterChip(m in combo, onClick = { combo = if (m in combo) combo - m else combo + m }, label = { Text(m.name) }) } }
                 }
                 "修饰键" -> Choices(ModifierKey.entries, modifier, { it.name }) { modifier = it }
+                "Prompt 编辑器" -> Text("打开当前会话的多行草稿")
                 "键盘开关" -> Text("展开或收起软键盘")
                 else -> {
                     OutlinedTextField(text, { if (it.length <= 4096) text = it }, label = { Text("发送内容") }, maxLines = 5)

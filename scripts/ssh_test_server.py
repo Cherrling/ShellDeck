@@ -67,7 +67,7 @@ AuthenticationMethods publickey
 UsePAM {"yes" if privileged else "no"}
 AllowUsers {getpass.getuser()}
 PermitRootLogin prohibit-password
-AllowTcpForwarding no
+AllowTcpForwarding local
 X11Forwarding no
 PermitTunnel no
 PrintMotd no

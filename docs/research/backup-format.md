@@ -26,13 +26,13 @@
 
 参考：[Android 密码学建议](https://developer.android.com/privacy-and-security/cryptography)、[PBEKeySpec](https://developer.android.com/reference/javax/crypto/spec/PBEKeySpec)、[Android 系统文件选择器](https://developer.android.com/training/data-storage/shared/documents-files)。
 
-## 载荷 v1
+## 载荷 v1 / v2
 
 使用 DataOutputStream / DataInputStream 的大端整数；文本为 `int32 UTF-8字节长度 + bytes`，普通文本上限 16 KiB、设置 JSON 上限 1 MiB。私钥为独立二进制字段，不经过 Base64 / JSON 字符串。顺序为：
 
-1. `int32 payloadVersion = 1`，设置 JSON。
+1. `int32 payloadVersion`（当前写入 2，兼容读取 1），设置 JSON。
 2. 身份数量（0–1000）；每个身份为 id、label、algorithm、fingerprint、publicKey 是否存在及可选文本、私钥长度和内容（1–256 KiB）。
-3. 主机数量（0–5000）；每个主机为 id、label、hostname、int32 port、username、identityId 是否存在及可选文本、startupCommand、boolean favorite、int64 lastUsedAt。
+3. 主机数量（0–5000）；每个主机为 id、label、hostname、int32 port、username、identityId 是否存在及可选文本、v2 增加 jumpHostId 是否存在及可选文本，随后为 startupCommand、boolean favorite、int64 lastUsedAt。
 
 拒绝重复 id、悬空 identityId、非法端口、控制字符启动命令和尾部多余数据。设置验证版本、取值范围、快捷键数据结构；额外限制 JSON 嵌套深度，避免递归解析资源耗尽。本机旧设置仍使用兼容读取规则，新备份使用严格校验。
 
@@ -58,3 +58,5 @@ SSHJ 完成原私钥解析，需要原口令时才提示。复用固定 BC 1.86 
 系统选择器使用 `application/octet-stream`，避免默认添加 `.txt`。待导出字节只在 ViewModel 所属对象中保存：默认是密文，显式无口令导出时为临时内存中的明文；不放入 SavedState。旋转保留流程，进程死亡后要求重新导出；文件选择器取消会清理字节，不写文件。
 
 从 rolling code 13 起，settings JSON 写入版本 2，包含可空 terminalTheme（21 个不透明 RGB 色）。读取继续兼容 settings v1；整包备份外层和 payload 版本均不变。含 v2 设置的备份需要新版 App 恢复。
+
+Rolling code 14 起 payload v2 保存跳板主机引用，恢复副本会重新映射引用并验证合并后的主机链。旧版 App 无法读取 v2 备份，新版继续读取 v1。

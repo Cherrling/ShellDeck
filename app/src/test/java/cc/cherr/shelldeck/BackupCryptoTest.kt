@@ -53,6 +53,18 @@ class BackupCryptoTest {
         data.close(); assertArrayEquals(ByteArray(3), data.identities.single().privateKey)
         bytes.fill(0)
     }
+    @Test fun legacyPayloadWithoutJumpFieldStillDecodes() {
+        val bytes = java.io.ByteArrayOutputStream()
+        val out = java.io.DataOutputStream(bytes)
+        fun text(value: String) { val utf = value.toByteArray(); out.writeInt(utf.size); out.write(utf) }
+        out.writeInt(1); text("{}"); out.writeInt(0); out.writeInt(1)
+        text("old"); text("Old host"); text("example.com"); out.writeInt(22); text("dev")
+        out.writeBoolean(false); text("tmux attach"); out.writeBoolean(true); out.writeLong(42)
+        BackupCodec.decode(bytes.toByteArray()).use {
+            assertNull(it.hosts.single().jumpHostId)
+            assertEquals("tmux attach", it.hosts.single().startupCommand)
+        }
+    }
     @Test fun fileReadIsBoundedBeforeDecrypting() {
         assertThrows(Exception::class.java) { readBackupFile(ByteArrayInputStream(ByteArray(BackupCrypto.MAX_FILE + 1))) }
     }

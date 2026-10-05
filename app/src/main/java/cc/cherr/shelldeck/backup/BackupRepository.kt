@@ -87,18 +87,23 @@ class BackupRepository(
                     dao.saveIdentity(record); identityMap[source.id] = id; keyCount++
                 }
             }
+            val hostMap = plan.hosts.zip(plan.hostEntries).associate { (source, entry) ->
+                source.id to destination(source.id, entry, hosts[source.id] ?: RestoreChoice.KEEP)
+            }
             plan.hosts.zip(plan.hostEntries).forEach { (source, entry) ->
                 val choice = hosts[source.id] ?: RestoreChoice.KEEP
                 if (entry.existingId == null || choice != RestoreChoice.KEEP) {
-                    val id = destination(source.id, entry, choice)
+                    val id = hostMap.getValue(source.id)
                     check(writtenHosts.add(id)) { "Conflicting host replacements" }
                     dao.saveHost(HostRecord().apply {
                         this.id = id; label = copyLabel(source.label, entry, choice); hostname = source.hostname
                         port = source.port; username = source.username; identityId = source.identityId?.let { identityMap.getValue(it) }
-                        startupCommand = source.startupCommand; favorite = source.favorite; lastUsedAt = source.lastUsedAt
+                        jumpHostId = source.jumpHostId?.let { hostMap.getValue(it) }; startupCommand = source.startupCommand; favorite = source.favorite; lastUsedAt = source.lastUsedAt
                     }); hostCount++
                 }
             }
+            val merged = dao.hosts().associateBy { it.id }
+            merged.values.forEach { cc.cherr.shelldeck.ssh.jumpRoute(it, merged::get) }
         }
         // SharedPreferences is a separate store: never report that DB restore failed after it committed.
         val settingsSaved = !restoreSettings || runCatching { settingsStore.saveRestored(plan.settings) }.getOrDefault(false)
@@ -123,7 +128,7 @@ class BackupRepository(
         val before = b.associateBy { it.id }
         return a.size == b.size && a.all { x -> before[x.id]?.let { y ->
             x.label == y.label && x.hostname == y.hostname && x.port == y.port && x.username == y.username &&
-                x.identityId == y.identityId && x.startupCommand == y.startupCommand && x.favorite == y.favorite && x.lastUsedAt == y.lastUsedAt
+                x.jumpHostId == y.jumpHostId && x.identityId == y.identityId && x.startupCommand == y.startupCommand && x.favorite == y.favorite && x.lastUsedAt == y.lastUsedAt
         } == true }
     }
 }

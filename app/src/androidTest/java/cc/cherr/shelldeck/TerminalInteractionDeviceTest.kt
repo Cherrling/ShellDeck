@@ -46,6 +46,14 @@ class TerminalInteractionDeviceTest {
                 main {
                     val emulator = terminal.session.emulator
                     append("\u001b[?2004h")
+                    terminal.promptDraft = "中文\nsecond"
+                    terminal.promptVisible = true
+                    terminal.leave()
+                    assertEquals("中文\nsecond", terminal.promptDraft)
+                    assertTrue(terminal.sendPrompt())
+                    assertEquals("\u001b[200~中文\rsecond\u001b[201~", output.toString("UTF-8")); output.reset()
+                    assertEquals("", terminal.promptDraft)
+                    assertFalse(terminal.promptVisible)
                     terminal.requestPaste("中文\nsecond")
                     assertNotNull(terminal.pendingPaste); assertEquals(0, output.size())
                     terminal.confirmPaste()

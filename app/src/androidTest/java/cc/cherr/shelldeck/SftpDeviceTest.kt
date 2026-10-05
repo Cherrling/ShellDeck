@@ -47,7 +47,8 @@ class SftpDeviceTest {
             ui.waitUntil(10000) { connection?.connected == true }
             ui.runOnUiThread { model.sessionManager.home() }
             ui.onNodeWithTag("page-SESSIONS").performClick()
-            ui.onNodeWithContentDescription("浏览 SFTP fixture host 的文件").performClick()
+            ui.onNodeWithContentDescription("SFTP fixture host 的会话工具").performClick()
+            ui.onNodeWithText("浏览文件").performClick()
             val files = connection!!.files
             fun idle() = ui.waitUntil(20000) { !files.busy }
             idle()
@@ -72,7 +73,10 @@ class SftpDeviceTest {
             assertArrayEquals(data, resolver.openInputStream(download)!!.use { it.readBytes() })
             ui.runOnUiThread { files.prepareUpload(upload) }; idle()
             ui.runOnUiThread { files.startUpload("中文文件.bin") }; idle()
-            assertTrue(files.message.orEmpty().contains("不会覆盖"))
+            assertTrue(files.message.orEmpty().contains("SFTP 操作失败"))
+            ui.runOnUiThread { files.select(files.entries.single { it.name == "中文文件.bin" }) }; idle()
+            ui.runOnUiThread { files.startDownload(download) }; idle()
+            assertArrayEquals(data, resolver.openInputStream(download)!!.use { it.readBytes() })
             assertTrue(connection!!.terminal.session.isReady)
             instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
             ui.onNodeWithTag("page-SESSIONS").assertIsDisplayed()

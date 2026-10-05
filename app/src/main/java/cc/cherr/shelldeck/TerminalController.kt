@@ -50,6 +50,7 @@ class TerminalController(private val app: Application, private val finished: () 
         if (terminalView?.handleKeyCode(keyCode, flags) == true) modifiers.consumed()
     }
     fun perform(action: KeyAction) {
+        if (action == KeyAction.OpenPrompt) { promptVisible = true; return }
         if (action == KeyAction.ToggleKeyboard) { toggleKeyboard(); return }
         if (!session.isReady) return
         when (action) {
@@ -65,6 +66,15 @@ class TerminalController(private val app: Application, private val finished: () 
     }
     private var viewReference = java.lang.ref.WeakReference<TerminalView>(null)
     private val terminalView: TerminalView? get() = viewReference.get()
+    // Process-memory only: drafts survive navigation/rotation, never enter backups or disk.
+    var promptDraft by mutableStateOf("")
+    var promptVisible by mutableStateOf(false)
+    fun sendPrompt(): Boolean {
+        if (!session.isReady || session.emulator == null || promptDraft.isBlank() || promptDraft.length > PasteRequest.MAX_CHARS) return false
+        session.emulator.paste(promptDraft)
+        promptDraft = ""; promptVisible = false
+        return true
+    }
     var pendingPaste by mutableStateOf<PasteRequest?>(null); private set
     var pasteError by mutableStateOf<String?>(null); private set
     fun dismissPaste() { pendingPaste = null; pasteError = null }
@@ -89,6 +99,7 @@ class TerminalController(private val app: Application, private val finished: () 
         it.isFocusableInTouchMode = true
         it.attachSession(session)
         it.setOnCreateContextMenuListener { menu, view, _ ->
+            menu.add("Prompt 编辑器").setOnMenuItemClickListener { promptVisible = true; true }
             menu.add("粘贴").setEnabled(session.isReady).setOnMenuItemClickListener { onPasteTextFromClipboard(session); true }
             menu.add("选择文本").setOnMenuItemClickListener { val now = android.os.SystemClock.uptimeMillis()
                 val event = MotionEvent.obtain(now, now, MotionEvent.ACTION_DOWN, view.width / 2f, view.height / 2f, 0)
@@ -123,7 +134,7 @@ class TerminalController(private val app: Application, private val finished: () 
         androidx.core.view.ViewCompat.getWindowInsetsController(it)?.hide(androidx.core.view.WindowInsetsCompat.Type.ime())
     } }
     fun colorsChanged() { session.emulator?.mColors?.reset(); onColorsChanged(session) }
-    fun close() { dismissPaste(); modifiers.clear(); session.finishIfRunning(); viewReference.clear() }
+    fun close() { promptDraft = ""; promptVisible = false; dismissPaste(); modifiers.clear(); session.finishIfRunning(); viewReference.clear() }
     override fun onTextChanged(changedSession: TerminalSession) {
         terminalView?.onScreenUpdated()
     }

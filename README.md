@@ -6,7 +6,7 @@
 
 - 主界面为服务器、会话、设置三个底部页面。点击主机卡片连接，编辑/复制/删除在卡片菜单；密钥管理放在设置中的 SSH 身份与密钥。终端返回先收键盘，再回会话页并保持连接。
 - 终端支持长按选区复制；多行或长文本粘贴先预览确认，保留 bracketed paste。Ctrl+Shift+V、鼠标中键和输入法粘贴统一处理；超大内容建议使用文件上传。
-- 会话卡片的文件夹图标打开 SFTP，可浏览远端目录、上传和下载文件；复用当前 SSH 连接。返回页面不停止传输，关闭连接会停止；上传拒绝覆盖同名文件。
+- 会话卡片的工具菜单打开 SFTP，可浏览远端目录、上传和下载文件；复用当前 SSH 连接。返回页面不停止传输，关闭连接会停止；上传默认不覆盖，支持二次确认后的原子覆盖，并支持新建目录、重命名和删除空目录/文件。
 - 终端可见时按帧合并刷新，隐藏窗口停止 View 刷新但继续解析；会话标题在 App 后台停止订阅。
 - 两行快捷键整体横向滑动；编辑器支持长按拖拽排序、跨行移动和边缘自动滚动，点击按键编辑内容。可调行高及每行显示数量，默认单行 38 dp、显示 7 个标准宽度按键，文字 12 sp；超出的整体横向滑动。Shift / Ctrl / Alt 支持一次性、按住及长按锁定，切换会话清理状态。
 - 主机支持名称、地址、用户名及端口搜索，兼容中文和缩写；提供全部 / 收藏 / 最近筛选。默认收藏置前，同组按最近使用排列；最近记录的是主动发起连接的时间，失败尝试也计入。编辑保留收藏和使用记录，复制共用原 Identity，副本不继承收藏和历史。
@@ -15,6 +15,9 @@
 - 内置 Maple Mono NF CN Regular，支持系统字体和导入 TTF / OTF、重命名、删除、字号及预览。终端内可用音量 ＋ / − 调整字号。
 - 正常连接时隐藏独立标题栏，快捷键占满整行，右下角不再放管理按钮。系统栏图标跟随实际页面/终端背景，深色终端使用浅色图标。
 - App 支持跟随系统/明亮/深色与动态配色；终端独立编辑 ANSI 16 色、前景、背景、光标和选区颜色，提供真实终端预览、JSON 导入导出和常见 Termux colors.properties 导入。保存后应用到现有与新建会话，自定义配色随加密备份保存。
+- Prompt 编辑器支持每会话内存草稿、多行中文输入、旋转保留和不追加回车的发送；入口在终端长按菜单、会话工具菜单或自定义快捷键。
+- 主机可配置跳板机（最多四层），逐跳校验指纹并独立认证；最终 SSH 连接支持本地端口转发，仅监听手机 127.0.0.1，关闭会话自动停止。
+- SSH 保活探测支持关闭/60秒/120秒，新连接生效；无自动重连或持续唤醒锁。设置可查看系统电池优化状态。
 - 设置页“关于 ShellDeck”显示版本号、版本码、UTC 构建时间和提交短 SHA；发布标题/说明带同一时间戳，并提供 build-info.json。固定 APK 下载链接不变。
 - SSH 身份支持本机生成 Ed25519（默认）或 RSA 3072，可选私钥口令；也支持 OpenSSH / PEM / PKCS#8 导入。每把密钥均可查看、复制公钥或通过系统文件选择器导出 OpenSSH `.pub`。旧身份首次提取公钥时仅在需要解密的情况下询问口令，之后查看公钥无需再次解锁。私钥始终经 Keystore 加密保存。
 - 设置中提供加密备份与恢复，包含主机、身份、启动命令和设置；支持恢复预览及逐项选择保留本机、覆盖或导入副本。恢复用新设备的 Keystore 重新加密私钥。导入字体文件和服务器信任记录不迁移。
@@ -30,7 +33,7 @@ ESC   /     -    PGUP   ↑   PGDN  SHIFT
 TAB  CTRL  ALT    ←     ↓    →    键盘
 ```
 
-数据库版本 3 新增主机启动命令和可空公钥缓存；支持版本 1 / 2 非破坏性升级，保留身份密文、主机引用、收藏、最近使用和服务器指纹。按照 [Room 迁移说明](https://developer.android.com/training/data-storage/room/migrating-db-versions) 保留历史 schema 并验证旧库迁移，不使用破坏性重建。
+数据库版本 4 增加跳板主机引用；支持版本 1 / 2 / 3 非破坏性升级，保留身份密文、主机引用、收藏、最近使用和服务器指纹。按照 [Room 迁移说明](https://developer.android.com/training/data-storage/room/migrating-db-versions) 保留历史 schema 并验证旧库迁移，不使用破坏性重建。
 
 ## 开发环境
 
@@ -63,6 +66,7 @@ APK 在 `app/build/outputs/apk/debug/app-debug.apk`。测试命令需要本机 O
 - push `v*` tag：检查版本与来源，测试、lint、签名构建、验签，发布 GitHub Release。
 - GitHub 仓库：[Cherrling/ShellDeck](https://github.com/Cherrling/ShellDeck)。后续正式发布使用已配置的固定签名 Secrets。详见 [发布说明](docs/development/releases.md)。
 - [后台会话与通知](docs/development/background-connections.md)。
+- [Rolling code 14 输入、文件和 SSH 网络能力](docs/development/rolling-code14-validation.md)。
 - [Rolling code 13 配色与版本追踪验证](docs/development/rolling-code13-validation.md)。
 - [Rolling code 12 终端交互、刷新与 SFTP 验证](docs/development/rolling-code12-validation.md)。
 - [Rolling code 11 本地验证](docs/development/rolling-code11-validation.md)。

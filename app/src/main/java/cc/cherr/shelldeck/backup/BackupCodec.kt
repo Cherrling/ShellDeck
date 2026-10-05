@@ -43,7 +43,7 @@ object BackupCodec {
         validate(data)
         return WipingBuffer(BackupCrypto.MAX_PLAINTEXT).use { buffer ->
             val out = DataOutputStream(buffer)
-            out.writeInt(1); out.text(data.settings, MAX_SETTINGS)
+            out.writeInt(2); out.text(data.settings, MAX_SETTINGS)
             out.writeInt(data.identities.size)
             data.identities.forEach { entry ->
                 val key = entry.record
@@ -55,6 +55,7 @@ object BackupCodec {
             data.hosts.forEach { host ->
                 out.text(host.id); out.text(host.label); out.text(host.hostname); out.writeInt(host.port); out.text(host.username)
                 out.writeBoolean(host.identityId != null); host.identityId?.let { out.text(it) }
+                out.writeBoolean(host.jumpHostId != null); host.jumpHostId?.let { out.text(it) }
                 out.text(host.startupCommand); out.writeBoolean(host.favorite); out.writeLong(host.lastUsedAt)
             }
             out.flush(); buffer.toByteArray()
@@ -65,7 +66,7 @@ object BackupCodec {
         val keys = mutableListOf<BackupIdentity>()
         try {
             val input = DataInputStream(ByteArrayInputStream(bytes))
-            require(input.readInt() == 1)
+            val version = input.readInt(); require(version in 1..2)
             val settings = input.text(MAX_SETTINGS)
             repeat(input.readInt().also { require(it in 0..1000) }) {
                 val record = IdentityRecord().apply {
@@ -78,6 +79,7 @@ object BackupCodec {
                 HostRecord().apply {
                     id = input.text(); label = input.text(); hostname = input.text(); port = input.readInt(); username = input.text()
                     identityId = if (input.readBoolean()) input.text() else null
+                    jumpHostId = if (version >= 2 && input.readBoolean()) input.text() else null
                     startupCommand = input.text(); favorite = input.readBoolean(); lastUsedAt = input.readLong()
                 }
             }
@@ -97,6 +99,7 @@ object BackupCodec {
             require(it.id.isNotBlank() && it.label.isNotBlank() && it.hostname.isNotBlank() && it.username.isNotBlank())
             require(it.port in 1..65535 && it.lastUsedAt >= 0 && (it.identityId == null || it.identityId in ids))
             require(it.hostname.none { char -> char.isWhitespace() || char == '/' || char.isISOControl() })
+            cc.cherr.shelldeck.ssh.jumpRoute(it) { id -> data.hosts.firstOrNull { host -> host.id == id } }
             startupCommandLine(it.startupCommand).fill(0)
         }
     }

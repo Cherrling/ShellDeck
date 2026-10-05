@@ -104,7 +104,7 @@ class ShellDeckModel(application: Application) : AndroidViewModel(application) {
             finally { post { working = false } }
         }
     }
-    fun saveHost(id: String?, label: String, hostname: String, port: String, username: String, identityId: String?, startupCommand: String = ""): Boolean {
+    fun saveHost(id: String?, label: String, hostname: String, port: String, username: String, identityId: String?, startupCommand: String = "", jumpHostId: String? = null): Boolean {
         val number = port.toIntOrNull()
         val host = hostname.trim().removeSurrounding("[", "]").lowercase(Locale.ROOT)
         if (host.isBlank() || host.any { it.isWhitespace() || it == '/' } || number == null || number !in 1..65535 || username.isBlank()) {
@@ -113,12 +113,18 @@ class ShellDeckModel(application: Application) : AndroidViewModel(application) {
         if (runCatching { startupCommandLine(startupCommand) }.isFailure) {
             error = "启动命令必须是单行、不含控制字符，且不超过 4095 字节"; return false
         }
+        val candidate = HostRecord().apply { this.id = id ?: "new-host"; this.jumpHostId = jumpHostId }
+        try {
+            val merged = (hosts.filter { it.id != candidate.id } + candidate).associateBy { it.id }
+            merged.values.forEach { cc.cherr.shelldeck.ssh.jumpRoute(it, merged::get) }
+        }
+        catch (failure: IllegalArgumentException) { error = failure.message; return false }
         operation("服务器保存失败") {
             val record = if (id == null) HostRecord() else requireNotNull(dao.host(id))
             dao.saveHost(record.apply {
                 this.id = id ?: UUID.randomUUID().toString(); this.label = label.trim().ifBlank { host }
                 this.hostname = host; this.port = number; this.username = username.trim(); this.identityId = identityId
-                this.startupCommand = startupCommand
+                this.startupCommand = startupCommand; this.jumpHostId = jumpHostId
             })
         }
         return true
@@ -128,7 +134,7 @@ class ShellDeckModel(application: Application) : AndroidViewModel(application) {
         val original = requireNotNull(dao.host(id))
         dao.saveHost(HostRecord().apply {
             this.id = UUID.randomUUID().toString(); label = "${original.label}（副本）"
-            hostname = original.hostname; port = original.port; username = original.username; identityId = original.identityId; startupCommand = original.startupCommand
+            hostname = original.hostname; port = original.port; username = original.username; identityId = original.identityId; startupCommand = original.startupCommand; jumpHostId = original.jumpHostId
         })
     }
     private fun markUsed(host: HostRecord) {
@@ -138,7 +144,7 @@ class ShellDeckModel(application: Application) : AndroidViewModel(application) {
             catch (_: Exception) { post { error = "最近连接记录保存失败，当前连接不受影响" } }
         }
     }
-    fun deleteHost(id: String) = operation("删除服务器失败") { dao.deleteHost(id) }
+    fun deleteHost(id: String) = operation("删除服务器失败：请先移除其他主机对该跳板机的引用") { require(dao.hosts().none { it.jumpHostId == id }); dao.deleteHost(id) }
     fun deleteIdentity(id: String) {
         if (hosts.any { it.identityId == id } || sessionManager.sessions.any { !it.ended && it.host.identityId == id }) {
             error = "此身份仍被服务器或活动会话引用，请先修改服务器并关闭相关连接"; return

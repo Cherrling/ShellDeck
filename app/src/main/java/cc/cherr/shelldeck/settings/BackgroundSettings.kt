@@ -1,5 +1,6 @@
 package cc.cherr.shelldeck.settings
 
+import androidx.core.net.toUri
 import android.Manifest
 import android.content.Intent
 import android.os.Build
@@ -26,6 +27,8 @@ import androidx.lifecycle.LifecycleOwner
 @Composable
 fun BackgroundSettings(mode: BackgroundMode, error: String?, change: (BackgroundMode) -> Unit) {
     val context = LocalContext.current
+    val power = context.getSystemService(android.os.PowerManager::class.java)
+    var unrestricted by remember { mutableStateOf(power.isIgnoringBatteryOptimizations(context.packageName)) }
     var allowed by remember { mutableStateOf(NotificationManagerCompat.from(context).areNotificationsEnabled()) }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
         allowed = NotificationManagerCompat.from(context).areNotificationsEnabled()
@@ -33,7 +36,10 @@ fun BackgroundSettings(mode: BackgroundMode, error: String?, change: (Background
     DisposableEffect(context) {
         val lifecycle = (context as? LifecycleOwner)?.lifecycle
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) allowed = NotificationManagerCompat.from(context).areNotificationsEnabled()
+            if (event == Lifecycle.Event.ON_RESUME) {
+                allowed = NotificationManagerCompat.from(context).areNotificationsEnabled()
+                unrestricted = power.isIgnoringBatteryOptimizations(context.packageName)
+            }
         }
         lifecycle?.addObserver(observer)
         onDispose { lifecycle?.removeObserver(observer) }
@@ -62,5 +68,14 @@ fun BackgroundSettings(mode: BackgroundMode, error: String?, change: (Background
             }) { Text("系统通知设置") }
         }
     }
+    Text(if (unrestricted) "系统电池优化：已豁免。厂商后台限制仍可能影响连接。"
+        else "系统电池优化：未豁免。前台通知不能保证 Doze 或长期熄屏时网络始终可用。", style = MaterialTheme.typography.bodySmall)
+    TextButton(onClick = {
+        val intent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+        try { context.startActivity(intent) }
+        catch (_: android.content.ActivityNotFoundException) {
+            context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, "package:${context.packageName}".toUri()))
+        }
+    }) { Text("系统电池设置") }
     error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
 }

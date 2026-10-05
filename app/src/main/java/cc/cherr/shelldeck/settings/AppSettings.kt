@@ -13,7 +13,7 @@ enum class TerminalPalette { DARK, LIGHT }
 data class AppSettings(val theme: ThemeMode = ThemeMode.SYSTEM, val dynamicColor: Boolean = true,
     val fontId: String = "maple", val fontSize: Int = 14, val palette: TerminalPalette = TerminalPalette.DARK,
     val keyboard: KeyboardProfile = KeyboardProfile.default(), val keyboardSizing: KeyboardSizing = KeyboardSizing(),
-    val backgroundMode: BackgroundMode = BackgroundMode.NORMAL, val terminalTheme: TerminalTheme? = null)
+    val backgroundMode: BackgroundMode = BackgroundMode.NORMAL, val terminalTheme: TerminalTheme? = null, val keepAliveSeconds: Int = 60)
 
 /** Non-secret preferences only. SSH credentials never enter this store. */
 class SettingsStore(context: Context, name: String = "appearance_and_keyboard") {
@@ -56,12 +56,14 @@ class SettingsStore(context: Context, name: String = "appearance_and_keyboard") 
                     it.optInt("visibleKeys", 7).let { n -> if (strict) n else n.coerceIn(4, 12) }) } ?: KeyboardSizing(),
                 if (strict) BackgroundMode.valueOf(root.optString("backgroundMode", "NORMAL"))
                 else BackgroundMode.entries.firstOrNull { it.name == root.optString("backgroundMode") } ?: BackgroundMode.NORMAL,
-                if (root.has("terminalTheme") && !root.isNull("terminalTheme")) TerminalTheme.fromJson(root.getJSONObject("terminalTheme")) else null)
+                if (root.has("terminalTheme") && !root.isNull("terminalTheme")) TerminalTheme.fromJson(root.getJSONObject("terminalTheme")) else null,
+                root.optInt("keepAliveSeconds", 60).also { require(it in listOf(0, 60, 120)) })
                 .also { require(it.fontSize in 8..32 && it.fontId.length <= 128); it.keyboard.validate(); it.keyboardSizing.validate() }
         }
         fun encode(settings: AppSettings): String {
-            settings.keyboard.validate(); settings.keyboardSizing.validate(); require(settings.fontSize in 8..32)
+            settings.keyboard.validate(); settings.keyboardSizing.validate(); require(settings.fontSize in 8..32 && settings.keepAliveSeconds in listOf(0, 60, 120))
             return JSONObject().put("version", 2).put("theme", settings.theme.name).put("dynamic", settings.dynamicColor)
+                .put("keepAliveSeconds", settings.keepAliveSeconds)
                 .put("terminalTheme", settings.terminalTheme?.json() ?: JSONObject.NULL)
                 .put("font", settings.fontId).put("size", settings.fontSize).put("palette", settings.palette.name)
                 .put("backgroundMode", settings.backgroundMode.name).put("keyboard", encodeKeyboard(settings.keyboard))
@@ -78,6 +80,7 @@ class SettingsStore(context: Context, name: String = "appearance_and_keyboard") 
                     is KeyAction.Modifier -> item.put("type", "modifier").put("value", a.key.name)
                     is KeyAction.EscapeSequence -> item.put("type", "escape").put("value", a.sequence)
                     is KeyAction.Macro -> item.put("type", "macro").put("value", a.text)
+                    KeyAction.OpenPrompt -> item.put("type", "prompt")
                     KeyAction.ToggleKeyboard -> item.put("type", "keyboard")
                 }
                 put(item)
@@ -96,6 +99,7 @@ class SettingsStore(context: Context, name: String = "appearance_and_keyboard") 
                     "modifier" -> KeyAction.Modifier(ModifierKey.valueOf(value))
                     "escape" -> KeyAction.EscapeSequence(value)
                     "macro" -> KeyAction.Macro(value)
+                    "prompt" -> KeyAction.OpenPrompt
                     "keyboard" -> KeyAction.ToggleKeyboard
                     else -> error("Unknown action")
                 }

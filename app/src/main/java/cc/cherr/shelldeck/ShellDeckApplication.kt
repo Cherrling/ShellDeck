@@ -20,7 +20,7 @@ class ShellDeckApplication : Application() {
 
 /** Main-thread owner shared by UI and service. Database lives as long as this process. */
 class ConnectionRuntime(private val application: Application) {
-    internal val database = Room.databaseBuilder(application, ShellDeckDatabase::class.java, "shelldeck.db").addMigrations(ShellDeckDatabase.MIGRATION_1_2, ShellDeckDatabase.MIGRATION_2_3).build()
+    internal val database = Room.databaseBuilder(application, ShellDeckDatabase::class.java, "shelldeck.db").addMigrations(ShellDeckDatabase.MIGRATION_1_2, ShellDeckDatabase.MIGRATION_2_3, ShellDeckDatabase.MIGRATION_3_4).build()
     val dao = database.records()
     val vault = CredentialVault()
     private val main = Handler(Looper.getMainLooper())
@@ -77,6 +77,7 @@ class ConnectionRuntime(private val application: Application) {
     internal fun serviceFailed() {
         starting = false
         backgroundError = "后台保持启动失败。当前连接仍可在前台使用。"
+        if (uiOwners == 0) sessions.closeAll()
     }
     private fun sessionsChanged() {
         // Coalesce closeAll and adjacent state transitions; terminal bytes never trigger this callback.

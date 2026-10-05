@@ -85,6 +85,26 @@ class BackupRepositoryDeviceTest {
             KeyStore.getInstance("AndroidKeyStore").apply { load(null); deleteEntry("source-$suffix"); deleteEntry("target-$suffix") }
         }
     }
+    @Test fun copiedJumpHostsRemainLinkedToCopiedGateways() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val db = Room.inMemoryDatabaseBuilder(context, ShellDeckDatabase::class.java).build()
+        val name = "jump-restore-${UUID.randomUUID()}"
+        val settings = SettingsStore(context, name)
+        val repository = BackupRepository(db, CredentialVault(), settings) { setOf("maple") }
+        try {
+            db.records().saveHost(HostRecord().apply { id = "gateway"; label = "Gateway"; hostname = "gateway.example"; username = "dev" })
+            db.records().saveHost(HostRecord().apply { id = "target"; label = "Target"; hostname = "target.internal"; username = "dev"; jumpHostId = "gateway" })
+            val archive = repository.export("password".toCharArray())
+            repository.prepare(archive, "password".toCharArray()).use { plan ->
+                repository.restore(plan, emptyMap(), mapOf("gateway" to RestoreChoice.COPY, "target" to RestoreChoice.COPY), false)
+            }
+            val copies = db.records().hosts().filter { it.id !in listOf("gateway", "target") }
+            assertEquals(2, copies.size)
+            val gateway = copies.single { it.hostname == "gateway.example" }
+            assertEquals(gateway.id, copies.single { it.hostname == "target.internal" }.jumpHostId)
+            assertEquals("gateway", db.records().host("target")!!.jumpHostId)
+        } finally { db.close(); context.deleteSharedPreferences(name) }
+    }
     @Test fun settingsRejectExcessiveNestingAndKeepQuotedMacroCharacters() {
         assertThrows(Exception::class.java) { SettingsStore.decode("[".repeat(1000) + "]".repeat(1000)) }
         assertThrows(Exception::class.java) { SettingsStore.decode("{\"version\":1,\"size\":999}") }

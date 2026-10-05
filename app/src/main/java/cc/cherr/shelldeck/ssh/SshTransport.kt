@@ -14,6 +14,8 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.net.SocketFactory
 
+data class SshHop(val hostname: String, val port: Int, val verify: HostKeyVerifier, val authenticate: (SSHClient) -> Unit)
+
 /** A single producer feeds the emulator; writes/resizes are serialized independently of reads. */
 class SshTransport(
     private val hostname: String,
@@ -23,6 +25,8 @@ class SshTransport(
     private val authenticate: (SSHClient) -> Unit,
     private val status: (ConnectionState) -> Unit,
     private val startupCommand: String = "",
+    private val route: (() -> List<SshHop>)? = null,
+    private val keepAliveSeconds: Int = 60,
 ) : TerminalTransport {
     private val closed = AtomicBoolean()
     private val outputLock = Any()
@@ -32,6 +36,7 @@ class SshTransport(
     private val reader = Executors.newSingleThreadExecutor()
     private val writer = ThreadPoolExecutor(1, 1, 0, TimeUnit.MILLISECONDS, ArrayBlockingQueue(256))
     private val socket = Socket()
+    private val clients = java.util.concurrent.ConcurrentLinkedDeque<SSHClient>()
     private val client = java.util.concurrent.atomic.AtomicReference<SSHClient?>()
     @Volatile private var shell: Session.Shell? = null
     private var listener: TerminalTransport.Listener? = null
@@ -42,24 +47,42 @@ class SshTransport(
             try {
                 check(!closed.get())
                 SshKeys.configure()
-                val ssh = SSHClient().also { client.set(it) }
-                check(!closed.get())
-                ssh.socketFactory = object : SocketFactory() {
-                    override fun createSocket(): Socket = socket
-                    override fun createSocket(h: String, p: Int): Socket = error("Unused")
-                    override fun createSocket(h: String, p: Int, l: InetAddress, lp: Int): Socket = error("Unused")
-                    override fun createSocket(h: InetAddress, p: Int): Socket = error("Unused")
-                    override fun createSocket(h: InetAddress, p: Int, l: InetAddress, lp: Int): Socket = error("Unused")
+                val hops = route?.invoke() ?: listOf(SshHop(hostname, port, verify, authenticate))
+                require(hops.isNotEmpty() && hops.size <= 5)
+                require(keepAliveSeconds == 0 || keepAliveSeconds in 30..600)
+                var previous: SSHClient? = null
+                hops.forEach { hop ->
+                    check(!closed.get())
+                    val config = net.schmizz.sshj.DefaultConfig().apply {
+                        keepAliveProvider = net.schmizz.keepalive.KeepAliveProvider.KEEP_ALIVE
+                    }
+                    val current = SSHClient(config)
+                    clients.addFirst(current)
+                    check(!closed.get())
+                    if (previous == null) current.socketFactory = object : SocketFactory() {
+                        override fun createSocket(): Socket = socket
+                        override fun createSocket(h: String, p: Int): Socket = error("Unused")
+                        override fun createSocket(h: String, p: Int, l: InetAddress, lp: Int): Socket = error("Unused")
+                        override fun createSocket(h: InetAddress, p: Int): Socket = error("Unused")
+                        override fun createSocket(h: InetAddress, p: Int, l: InetAddress, lp: Int): Socket = error("Unused")
+                    }
+                    current.connection.keepAlive.keepAliveInterval = keepAliveSeconds
+                    (current.connection.keepAlive as net.schmizz.keepalive.KeepAliveRunner).maxAliveCount = 3
+                    current.connectTimeout = 15_000
+                    current.transport.timeoutMs = 120_000
+                    current.addHostKeyVerifier(hop.verify)
+                    status(ConnectionState.CONNECTING)
+                    if (previous == null) current.connect(hop.hostname, hop.port)
+                    else current.connectVia(previous!!.newDirectConnection(hop.hostname, hop.port))
+                    check(!closed.get())
+                    current.transport.timeoutMs = 20_000
+                    status(ConnectionState.AUTHENTICATING)
+                    hop.authenticate(current)
+                    check(!closed.get())
+                    previous = current
                 }
-                ssh.connectTimeout = 15_000
-                ssh.transport.timeoutMs = 120_000 // Allows time for the fingerprint dialog.
-                ssh.addHostKeyVerifier(verify)
-                status(ConnectionState.CONNECTING)
-                ssh.connect(hostname, port)
-                check(!closed.get())
-                ssh.transport.timeoutMs = 20_000
-                status(ConnectionState.AUTHENTICATING)
-                authenticate(ssh)
+                val ssh = requireNotNull(previous)
+                client.set(ssh)
                 check(!closed.get())
                 val channel = ssh.startSession()
                 channel.allocatePTY("xterm-256color", initial.columns, initial.rows,
@@ -107,6 +130,10 @@ class SshTransport(
         check(ssh.isAuthenticated)
         return ssh.newSFTPClient()
     }
+    fun openTunnel(localPort: Int, remoteHost: String, remotePort: Int): LocalTunnel {
+        check(!closed.get() && shell != null)
+        return LocalTunnel(requireNotNull(client.get()), localPort, remoteHost, remotePort)
+    }
     private fun send(action: () -> Unit) {
         if (closed.get()) return
         try { writer.execute {
@@ -145,7 +172,11 @@ class SshTransport(
     }
     private fun closeClient() {
         // Ownership is transferred once; UI cancellation and reader completion may race.
-        try { client.getAndSet(null)?.close() } catch (_: Exception) { }
+        client.set(null)
+        while (true) {
+            val owned = clients.pollFirst() ?: break
+            try { owned.close() } catch (_: Exception) { }
+        }
     }
     override fun close() {
         if (!closed.compareAndSet(false, true)) return

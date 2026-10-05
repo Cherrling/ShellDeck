@@ -27,7 +27,18 @@ class SftpFiles(private val client: SFTPClient, private val cancelled: () -> Boo
         require(attrs.type == FileMode.Type.DIRECTORY || attrs.type == FileMode.Type.REGULAR) { "仅支持目录和普通文件。" }
         return entry.copy(directory = attrs.type == FileMode.Type.DIRECTORY, size = attrs.size)
     }
-    fun upload(directory: String, name: String, input: InputStream, progress: (Long) -> Unit) {
+    fun mkdir(directory: String, name: String) { checkActive(); client.mkdir(child(directory, name)) }
+    fun rename(entry: Entry, name: String) {
+        checkActive(); client.rename(entry.path, child(entry.path.substringBeforeLast('/'), name))
+    }
+    fun delete(entry: Entry) {
+        checkActive()
+        // lstat: deleting a symlink never follows it. Directories must be empty.
+        if (client.lstat(entry.path).type == FileMode.Type.DIRECTORY) client.rmdir(entry.path) else client.rm(entry.path)
+    }
+    fun upload(directory: String, name: String, input: InputStream, progress: (Long) -> Unit) =
+        upload(directory, name, input, false, progress)
+    fun upload(directory: String, name: String, input: InputStream, overwrite: Boolean, progress: (Long) -> Unit) {
         val target = child(directory, name)
         val temporary = child(directory, ".shelldeck-" + UUID.randomUUID() + ".part")
         var created = false
@@ -52,7 +63,8 @@ class SftpFiles(private val client: SFTPClient, private val cancelled: () -> Boo
             }
             checkActive()
             // Empty rename flags deliberately do not allow overwrite, including races after browsing.
-            client.rename(temporary, target)
+            if (overwrite) client.rename(temporary, target, setOf(RenameFlags.OVERWRITE, RenameFlags.ATOMIC))
+            else client.rename(temporary, target)
             published = true
         } finally {
             if (created && !published) try { client.rm(temporary) } catch (_: Exception) {

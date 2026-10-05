@@ -61,9 +61,17 @@ class SftpIntegrationTest {
                     cancelFiles.upload(directory.path, "cancelled.bin", data.inputStream()) { cancelled = true }
                 }
                 assertEquals(listOf(name), directory.listFiles()!!.map { it.name })
+                files.mkdir(directory.path, "empty")
+                val folder = files.list(directory.path).second.first { it.name == "empty" }
+                files.rename(folder, "renamed")
+                files.delete(files.list(directory.path).second.first { it.name == "renamed" })
+                files.upload(directory.path, name, "replacement".byteInputStream(), true) {}
+                assertEquals("replacement", target.readText())
                 val link = File(directory, "link")
                 java.nio.file.Files.createSymbolicLink(link.toPath(), target.toPath())
-                assertFalse(files.resolve(files.list(directory.path).second.first { it.link }).directory)
+                val linked = files.list(directory.path).second.first { it.link }
+                assertFalse(files.resolve(linked).directory)
+                files.delete(linked); assertTrue(target.exists()); assertFalse(link.exists())
                 assertThrows(IllegalArgumentException::class.java) { SftpFiles.child(directory.path, "../escape") }
                 assertThrows(IllegalArgumentException::class.java) { SftpFiles.child(directory.path, ".") }
             }
