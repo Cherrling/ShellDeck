@@ -95,22 +95,33 @@ class SessionNavigationDeviceTest {
             ui.runOnIdle { assertNull(model.sessionManager.selected); assertFalse(connection.ended) }
             ui.onNodeWithText("取消", substring = false).performClick()
             ui.runOnIdle { assertTrue(connection.terminal.session.isReady) }
-            // A closed transport leaves its output readable and exposes a single explicit retry action.
+            // Disconnected terminals stay readable; opening another connection requires the Hosts page.
             ui.onNodeWithTag("session-${connection.id}").performClick()
             ui.runOnUiThread { connection.terminal.session.finishIfRunning() }
             ui.waitUntil(5000) { connection.ended }
-            ui.onNodeWithContentDescription("重新连接").performClick()
-            ui.waitUntil(10000) { model.sessionManager.selected?.challenge != null }
-            val retry = model.sessionManager.selected!!
-            ui.onNodeWithText("仅信任本次").performClick()
-            ui.waitUntil(10000) { retry.terminal.session.isReady }
+            ui.onNodeWithContentDescription("重新连接").assertDoesNotExist()
             ui.runOnIdle {
-                assertNotEquals(connection.id, retry.id)
-                assertTrue(retry.number > connection.number)
+                assertSame(connection, model.sessionManager.selected)
+                assertEquals(1, model.sessionManager.sessions.size)
+                assertFalse(connection.terminal.session.isReady)
                 assertEquals("Codex project test", connection.terminal.title)
-                model.sessionManager.close(retry.id)
                 model.sessionManager.home()
             }
+            ui.onNodeWithTag("session-${connection.id}").assertExists()
+            ui.onNodeWithTag("page-HOSTS").performClick()
+            ui.onNodeWithTag("host-${host.id}").performClick()
+            ui.waitUntil(10000) { model.sessionManager.selected?.challenge != null }
+            val fresh = model.sessionManager.selected!!
+            ui.onNodeWithText("仅信任本次").performClick()
+            ui.waitUntil(10000) { fresh.terminal.session.isReady }
+            ui.runOnIdle {
+                assertNotEquals(connection.id, fresh.id)
+                assertTrue(fresh.number > connection.number)
+                assertEquals("Codex project test", connection.terminal.title)
+                model.sessionManager.close(fresh.id)
+                model.sessionManager.home()
+            }
+            ui.onNodeWithTag("page-SESSIONS").performClick()
             ui.onNodeWithTag("close-session-${connection.id}").performClick()
             ui.onNodeWithText("确认", substring = false).performClick()
             ui.runOnIdle { assertTrue(model.sessionManager.sessions.isEmpty()); assertTrue(connection.ended) }

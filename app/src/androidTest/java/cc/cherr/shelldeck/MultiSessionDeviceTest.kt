@@ -67,15 +67,15 @@ class MultiSessionDeviceTest {
             main {
                 assertEquals(cc.cherr.shelldeck.ssh.ConnectionState.ENDED, second.state)
                 assertTrue(second.terminal.session.emulator.screen.transcriptText.contains("RETRY_OK"))
-                val retry = manager.reconnect(second.id, "")!!
-                assertSame(retry, manager.reconnect(second.id, ""))
-                assertEquals(4L, retry.number)
-                assertEquals(listOf(second.id, retry.id), manager.sessions.map { it.id })
+                val fresh = manager.connect(host, "")
+                assertSame(fresh, manager.connect(host, ""))
+                assertEquals(4L, fresh.number)
+                assertEquals(listOf(second.id, fresh.id), manager.sessions.map { it.id })
                 assertTrue(second.terminal.session.emulator.screen.transcriptText.contains("RETRY_OK"))
             }
-            waitFor("retry rechecks unsaved host key") { manager.selected?.challenge != null }
+            waitFor("new connection checks its own host key") { manager.selected?.challenge != null }
             main { manager.selected!!.trust(TrustDecision.ONCE) }
-            waitFor("retry authenticated") { manager.selected!!.terminal.session.isReady }
+            waitFor("new connection authenticated") { manager.selected!!.terminal.session.isReady }
 
         } finally { main { manager.closeAll() }; db.close() }
     }

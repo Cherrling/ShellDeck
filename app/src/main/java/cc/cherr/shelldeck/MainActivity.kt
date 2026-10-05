@@ -105,7 +105,6 @@ private fun ShellDeckApp(model: ShellDeckModel, activity: MainActivity) {
     var editing by remember { mutableStateOf<HostRecord?>(null) }
     var importing by remember { mutableStateOf(false) }
     var login by remember { mutableStateOf<HostRecord?>(null) }
-    var reconnectingId by remember { mutableStateOf<String?>(null) }
     var closing by remember { mutableStateOf<String?>(null) }
     var page by rememberSaveable { mutableStateOf(MainPage.HOSTS) }
     var showIdentities by rememberSaveable { mutableStateOf(false) }
@@ -161,15 +160,8 @@ private fun ShellDeckApp(model: ShellDeckModel, activity: MainActivity) {
             if (showSettings) SettingsScreen(model, onIdentities = { showIdentities = true }, onEditorVisibilityChanged = { editingKeyboard = it }) { page = MainPage.HOSTS }
             else if (terminal != null && connection != null) {
                 if (!connection.connected) {
-                    Row(Modifier.fillMaxWidth().padding(start = 12.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                        Text(connection.status, Modifier.weight(1f), style = MaterialTheme.typography.labelSmall,
-                            maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        if (connection.ended) IconButton(onClick = {
-                            val host = model.hosts.firstOrNull { it.id == connection.host.id } ?: connection.host
-                            if (host.identityId == null) { reconnectingId = connection.id; login = host }
-                            else model.reconnect(connection.id, "")
-                        }) { Icon(painterResource(R.drawable.ic_refresh), contentDescription = "重新连接") }
-                    }
+                    Text(connection.status, Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+                        style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
                 key(terminal) {
                     AndroidView(factory = terminal::createView, modifier = Modifier.weight(1f).fillMaxWidth(),
@@ -231,7 +223,7 @@ private fun ShellDeckApp(model: ShellDeckModel, activity: MainActivity) {
                     }
                     items(visibleHosts, key = { it.id }) { host ->
                         var hostMenu by remember(host.id) { mutableStateOf(false) }
-                        Card(onClick = { if (host.identityId == null) { reconnectingId = null; login = host } else model.connect(host, "") },
+                        Card(onClick = { if (host.identityId == null) login = host else model.connect(host, "") },
                             enabled = !model.busy, modifier = Modifier.fillMaxWidth().testTag("host-${host.id}")) {
                             Row(Modifier.padding(12.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                                 Column(Modifier.weight(1f)) {
@@ -279,13 +271,13 @@ private fun ShellDeckApp(model: ShellDeckModel, activity: MainActivity) {
     if (importing) ImportDialog(model, onDismiss = { importing = false })
     login?.let { host ->
         var secret by remember(host.id) { mutableStateOf("") }
-        AlertDialog(properties = DialogProperties(securePolicy = SecureFlagPolicy.SecureOn), onDismissRequest = { secret = ""; login = null; reconnectingId = null }, title = { Text("连接 ${host.label}") },
+        AlertDialog(properties = DialogProperties(securePolicy = SecureFlagPolicy.SecureOn), onDismissRequest = { secret = ""; login = null }, title = { Text("连接 ${host.label}") },
             text = { Column {
                 Text("输入服务器登录密码，不会保存。")
                 OutlinedTextField(value = secret, onValueChange = { secret = it }, label = { Text("密码") },
                     singleLine = true, visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password))
-            } }, confirmButton = { TextButton(onClick = { if (reconnectingId != null) model.reconnect(reconnectingId!!, secret) else model.connect(host, secret); secret = ""; login = null; reconnectingId = null }) { Text("连接") } },
-            dismissButton = { TextButton(onClick = { secret = ""; login = null; reconnectingId = null }) { Text("取消") } })
+            } }, confirmButton = { TextButton(onClick = { model.connect(host, secret); secret = ""; login = null }) { Text("连接") } },
+            dismissButton = { TextButton(onClick = { secret = ""; login = null }) { Text("取消") } })
     }
     connection?.takeUnless { showSettings }?.passphraseIdentity?.let { identity ->
         var secret by remember(identity) { mutableStateOf("") }

@@ -19,7 +19,6 @@ class SessionManager(private val application: Application, private val dao: Stor
     var selectedId by mutableStateOf<String?>(null); private set
     val selected get() = sessions.firstOrNull { it.id == selectedId }
     val activeCount get() = sessions.count { !it.ended }
-    private val retries = mutableMapOf<String, String>()
     fun connect(host: HostRecord, secret: String): SessionConnection {
         // Repeated taps while authentication is pending select that attempt instead of opening another.
         sessions.firstOrNull { it.host.id == host.id && !it.ended && !it.terminal.session.isReady }?.let {
@@ -30,21 +29,12 @@ class SessionManager(private val application: Application, private val dao: Stor
         sessions.add(connection); selectedId = connection.id; changed()
         return connection
     }
-    fun reconnect(id: String, secret: String, host: HostRecord? = null): SessionConnection? {
-        val previous = sessions.firstOrNull { it.id == id } ?: return null
-        if (!previous.ended) { select(id); return previous }
-        retries[id]?.let { retryId -> sessions.firstOrNull { it.id == retryId && !it.ended } }?.let {
-            select(it.id); return it
-        }
-        // A fresh SSH channel cannot resume an old shell. Keep its terminal available for review.
-        return connect(host ?: previous.host, secret).also { retries[id] = it.id }
-    }
     fun select(id: String) { require(sessions.any { it.id == id }); selected?.terminal?.leave(); selectedId = id }
     fun home() { selected?.terminal?.leave(); selectedId = null }
     fun close(id: String) {
         val connection = sessions.firstOrNull { it.id == id } ?: return
         if (selectedId == id) home()
-        connection.close(); sessions.remove(connection); retries.remove(id); changed()
+        connection.close(); sessions.remove(connection); changed()
     }
     fun closeAll() { sessions.toList().forEach { close(it.id) } }
 }

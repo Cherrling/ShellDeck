@@ -175,14 +175,6 @@ class ShellDeckModel(application: Application) : AndroidViewModel(application) {
         runtime.userRequestedConnection()
         sessionManager.selected?.terminal?.appearance(typeface, settings.fontSize)
     }
-    fun reconnect(id: String, secret: String) {
-        val old = sessionManager.sessions.firstOrNull { it.id == id } ?: return
-        val before = sessionManager.sessions.size
-        val connection = sessionManager.reconnect(id, secret, hosts.firstOrNull { it.id == old.host.id }) ?: return
-        if (sessionManager.sessions.size > before) markUsed(connection.host)
-        runtime.userRequestedConnection()
-        connection.terminal.appearance(typeface, settings.fontSize)
-    }
     override fun onCleared() {
         cleared = true; runtime.detachUi()
         worker.shutdown()
