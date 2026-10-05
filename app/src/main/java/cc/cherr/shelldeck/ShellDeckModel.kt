@@ -36,7 +36,9 @@ class ShellDeckModel(application: Application) : AndroidViewModel(application) {
     private var fontRequest = 0L
     var hosts by mutableStateOf<List<HostRecord>>(emptyList()); private set
     var identities by mutableStateOf<List<IdentityRecord>>(emptyList()); private set
-    var busy by mutableStateOf(false); private set
+    private var working by mutableStateOf(false)
+    val backup = cc.cherr.shelldeck.backup.BackupController(application, runtime) { refresh(); updateSettings(settingsStore.read()) }
+    val busy get() = working || backup.busy
     var error by mutableStateOf<String?>(null); private set
     init { runtime.attachUi(); refresh(); reloadFonts(); applyPalette(settings.palette) }
     fun updateSettings(value: AppSettings) {
@@ -95,11 +97,11 @@ class ShellDeckModel(application: Application) : AndroidViewModel(application) {
     }
     private fun operation(failure: String, action: () -> Unit) {
         if (busy || cleared) return
-        busy = true
+        working = true
         worker.execute {
             try { action(); reload() }
             catch (_: Exception) { post { error = failure } }
-            finally { post { busy = false } }
+            finally { post { working = false } }
         }
     }
     fun saveHost(id: String?, label: String, hostname: String, port: String, username: String, identityId: String?, startupCommand: String = ""): Boolean {
@@ -245,7 +247,7 @@ class ShellDeckModel(application: Application) : AndroidViewModel(application) {
         sessionManager.selected?.terminal?.appearance(typeface, settings.fontSize)
     }
     override fun onCleared() {
-        cleared = true; runtime.detachUi()
+        cleared = true; backup.close(); runtime.detachUi()
         worker.shutdown()
     }
 }

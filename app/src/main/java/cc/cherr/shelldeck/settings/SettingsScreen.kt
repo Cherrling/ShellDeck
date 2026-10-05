@@ -37,7 +37,9 @@ fun SettingsScreen(model: ShellDeckModel, onIdentities: () -> Unit = {}, onEdito
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("设置", style = MaterialTheme.typography.headlineMedium)
         ListItem(headlineContent = { Text("SSH 身份与密钥") },
-            supportingContent = { Text("导入和管理私钥，供服务器共用") }, modifier = Modifier.clickable(onClick = onIdentities))
+            supportingContent = { Text("生成、导入、导出密钥，供服务器共用") }, modifier = Modifier.clickable(onClick = onIdentities))
+        ListItem(headlineContent = { Text("备份与恢复") }, supportingContent = { Text("加密备份、迁移和恢复主机与身份") },
+            modifier = Modifier.clickable(enabled = !model.busy) { model.backup.menu = true })
         HorizontalDivider()
         Text("外观", style = MaterialTheme.typography.titleLarge)
         Choices(ThemeMode.entries, settings.theme, { when(it) { ThemeMode.SYSTEM -> "跟随系统"; ThemeMode.LIGHT -> "明亮"; ThemeMode.DARK -> "深色" } }) {

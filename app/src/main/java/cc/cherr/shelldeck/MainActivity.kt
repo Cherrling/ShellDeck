@@ -261,7 +261,16 @@ private fun ShellDeckApp(model: ShellDeckModel, activity: MainActivity) {
                                 Text(identity.algorithm, style = MaterialTheme.typography.bodySmall)
                                 Text(identity.fingerprint, style = MaterialTheme.typography.labelSmall)
                                 TextButton(enabled = !model.busy, onClick = { model.showPublicKey(identity.id) }) { Text("查看公钥") }
-                                TextButton(enabled = !model.busy, onClick = { deletingIdentity = identity }) { Text("删除身份") }
+                                var identityMenu by remember { mutableStateOf(false) }
+                                Box {
+                                    IconButton(enabled = !model.busy, onClick = { identityMenu = true }) {
+                                        Icon(painterResource(R.drawable.ic_more_vert), contentDescription = "${identity.label} 的密钥操作")
+                                    }
+                                    DropdownMenu(identityMenu, onDismissRequest = { identityMenu = false }) {
+                                        DropdownMenuItem(text = { Text("导出私钥") }, onClick = { identityMenu = false; model.backup.privateKey(identity.id) })
+                                        DropdownMenuItem(text = { Text("删除身份") }, onClick = { identityMenu = false; deletingIdentity = identity })
+                                    }
+                                }
                             }
                         }
                     }
@@ -280,6 +289,7 @@ private fun ShellDeckApp(model: ShellDeckModel, activity: MainActivity) {
         } }, confirmButton = { TextButton(onClick = { addingIdentity = false }) { Text("取消") } })
     if (generating) GenerateIdentityDialog(model) { generating = false }
     PublicKeyDialogs(model)
+    cc.cherr.shelldeck.backup.BackupDialogs(model.backup)
     if (importing) ImportDialog(model, onDismiss = { importing = false })
     login?.let { host ->
         var secret by remember(host.id) { mutableStateOf("") }

@@ -69,6 +69,9 @@ fun PublicKeyDialogs(model: ShellDeckModel) {
                 Text("公钥 · OpenSSH 格式")
                 SelectionContainer { Text(detail.key, style = MaterialTheme.typography.bodySmall) }
                 TextButton(enabled = !model.busy, onClick = {
+                    model.dismissPublicKey(); model.backup.privateKey(detail.id)
+                }) { Text("导出私钥") }
+                TextButton(enabled = !model.busy, onClick = {
                     (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
                         .setPrimaryClip(ClipData.newPlainText("SSH 公钥", detail.key))
                     copied = true
