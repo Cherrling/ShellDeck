@@ -7,6 +7,7 @@
 - 主界面为服务器、会话、设置三个底部页面。点击主机卡片连接，编辑/复制/删除在卡片菜单；密钥管理放在设置中的 SSH 身份与密钥。终端返回先收键盘，再回会话页并保持连接。
 - 终端支持长按选区复制；多行或长文本粘贴先预览确认，保留 bracketed paste。Ctrl+Shift+V、鼠标中键和输入法粘贴统一处理；超大内容建议使用文件上传。
 - 会话卡片的工具菜单打开 SFTP，可浏览远端目录、上传和下载文件；复用当前 SSH 连接。返回页面不停止传输，关闭连接会停止；上传默认不覆盖，支持二次确认后的原子覆盖，并支持新建目录、重命名和删除空目录/文件。
+- SFTP 目录浏览复用独立通道，传输期间可继续导航；最近目录先显示内存缓存再刷新，快速切换仅保留最新导航，取消传输不影响浏览。
 - 终端可见时按帧合并刷新，隐藏窗口停止 View 刷新但继续解析；会话标题在 App 后台停止订阅。
 - 两行快捷键整体横向滑动；编辑器支持长按拖拽排序、跨行移动和边缘自动滚动，点击按键编辑内容。可调行高及每行显示数量，默认单行 38 dp、显示 7 个标准宽度按键，文字 12 sp；超出的整体横向滑动。Shift / Ctrl / Alt 支持一次性、按住及长按锁定，切换会话清理状态。
 - 主机支持名称、地址、用户名及端口搜索，兼容中文和缩写；提供全部 / 收藏 / 最近筛选。默认收藏置前，同组按最近使用排列；最近记录的是主动发起连接的时间，失败尝试也计入。编辑保留收藏和使用记录，复制共用原 Identity，副本不继承收藏和历史。
@@ -66,6 +67,7 @@ APK 在 `app/build/outputs/apk/debug/app-debug.apk`。测试命令需要本机 O
 - push `v*` tag：检查版本与来源，测试、lint、签名构建、验签，发布 GitHub Release。
 - GitHub 仓库：[Cherrling/ShellDeck](https://github.com/Cherrling/ShellDeck)。后续正式发布使用已配置的固定签名 Secrets。详见 [发布说明](docs/development/releases.md)。
 - [后台会话与通知](docs/development/background-connections.md)。
+- [Rolling code 15 SFTP 目录导航验证](docs/development/rolling-code15-validation.md)。
 - [Rolling code 14 输入、文件和 SSH 网络能力](docs/development/rolling-code14-validation.md)。
 - [Rolling code 13 配色与版本追踪验证](docs/development/rolling-code13-validation.md)。
 - [Rolling code 12 终端交互、刷新与 SFTP 验证](docs/development/rolling-code12-validation.md)。

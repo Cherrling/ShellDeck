@@ -39,12 +39,12 @@ fun SftpScreen(connection: SessionConnection, onDismiss: () -> Unit) {
                 var directory by remember(files.path) { mutableStateOf(files.path) }
                 OutlinedTextField(directory, { directory = it }, singleLine = true, label = { Text("远端目录") },
                     modifier = Modifier.fillMaxWidth(), trailingIcon = {
-                        TextButton(enabled = !files.busy && connection.connected, onClick = { files.browse(directory.ifBlank { "." }) }) { Text("前往") }
+                        TextButton(enabled = connection.connected, onClick = { files.browse(directory.ifBlank { "." }) }) { Text("前往") }
                     })
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    TextButton(enabled = !files.busy && files.path.isNotBlank() && connection.connected,
-                        onClick = { files.browse(files.path.trimEnd('/').substringBeforeLast('/', "").ifBlank { "/" }) }) { Text("上级目录") }
-                    IconButton(enabled = !files.busy && connection.connected, onClick = { files.browse() }) {
+                    TextButton(enabled = files.path.isNotBlank() && connection.connected,
+                        onClick = files::parent) { Text("上级目录") }
+                    IconButton(enabled = connection.connected, onClick = { files.browse() }) {
                         Icon(painterResource(R.drawable.ic_refresh), contentDescription = "刷新目录")
                     }
                     TextButton(enabled = !files.busy && files.path.isNotBlank() && connection.connected,
@@ -52,7 +52,15 @@ fun SftpScreen(connection: SessionConnection, onDismiss: () -> Unit) {
                 }
                 TextButton(enabled = !files.busy && connection.connected && files.path.isNotBlank(),
                     onClick = { creating = true }) { Text("新建目录") }
-                if (files.busy) {
+                if (files.loading) {
+                    LinearProgressIndicator(Modifier.fillMaxWidth())
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text(if (files.cached) "显示缓存，正在刷新…" else "正在读取目录…")
+                        TextButton(onClick = files::cancelBrowse) { Text("取消读取") }
+                    }
+                }
+                files.browseMessage?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                if (files.transferring) {
                     val total = files.totalBytes?.takeIf { it > 0 && files.operation in listOf("上传", "下载") }
                     if (total == null) LinearProgressIndicator(Modifier.fillMaxWidth())
                     else LinearProgressIndicator(progress = { (files.transferred.toFloat() / total).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
@@ -79,7 +87,7 @@ fun SftpScreen(connection: SessionConnection, onDismiss: () -> Unit) {
                                 }
                             } },
                             leadingContent = { Icon(painterResource(if (entry.directory) R.drawable.ic_folder else R.drawable.ic_file), null) },
-                            modifier = Modifier.clickable(enabled = !files.busy && connection.connected) { files.select(entry) })
+                            modifier = Modifier.clickable(enabled = connection.connected && (entry.directory || entry.link || !files.busy)) { files.select(entry) })
                     }
                 }
             }
@@ -110,7 +118,7 @@ fun SftpScreen(connection: SessionConnection, onDismiss: () -> Unit) {
             Row { Checkbox(overwrite, { overwrite = it }); Text("允许覆盖同名文件") }
             OutlinedTextField(name, { name = it }, label = { Text("远端文件名") }, singleLine = true)
             files.message?.let { Text(it) }
-        } }, confirmButton = { TextButton(enabled = !files.busy && connection.connected, onClick = { if (overwrite) confirmOverwrite = true else files.startUpload(name) }) { Text("上传") } },
+        } }, confirmButton = { TextButton(enabled = !files.transferring && connection.connected, onClick = { if (overwrite) confirmOverwrite = true else files.startUpload(name) }) { Text("上传") } },
             dismissButton = { TextButton(onClick = files::dismissUpload) { Text("取消") } })
             if (confirmOverwrite) AlertDialog(onDismissRequest = { confirmOverwrite = false }, title = { Text("确认覆盖远端文件？") },
             text = { Text("${request.directory}/$name\n若目标已存在，将在上传完成后替换，旧内容无法恢复。") },
@@ -120,7 +128,7 @@ fun SftpScreen(connection: SessionConnection, onDismiss: () -> Unit) {
     files.download?.let { entry ->
         AlertDialog(onDismissRequest = files::dismissDownload, title = { Text("下载文件") },
             text = { Text("${entry.name}\n${entry.size} 字节") },
-            confirmButton = { TextButton(enabled = !files.busy && connection.connected, onClick = { saver.launch(entry.name) }) { Text("选择保存位置") } },
+            confirmButton = { TextButton(enabled = !files.transferring && connection.connected, onClick = { saver.launch(entry.name) }) { Text("选择保存位置") } },
             dismissButton = { TextButton(onClick = files::dismissDownload) { Text("取消") } })
     }
 }

@@ -10,9 +10,9 @@ import java.util.UUID
 class SftpFiles(private val client: SFTPClient, private val cancelled: () -> Boolean = { false }) {
     data class Entry(val name: String, val path: String, val directory: Boolean, val link: Boolean, val size: Long)
     fun checkActive() { if (cancelled()) throw InterruptedIOException("Transfer cancelled") }
-    fun list(path: String): Pair<String, List<Entry>> {
+    fun list(path: String, canonicalPath: Boolean = false): Pair<String, List<Entry>> {
         checkActive()
-        val canonical = client.canonicalize(path)
+        val canonical = if (canonicalPath) path else client.canonicalize(path)
         var count = 0
         val entries = client.ls(canonical, RemoteResourceFilter {
             checkActive(); require(++count <= 10_000) { "目录超过 10,000 项，请进入更小的目录。" }; true
