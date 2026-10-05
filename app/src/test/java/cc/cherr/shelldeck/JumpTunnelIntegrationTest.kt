@@ -57,7 +57,12 @@ class JumpTunnelIntegrationTest {
                     }
                 } finally { tunnel.close() }
                 worker.join(10000); assertFalse(worker.isAlive)
-                assertThrows(Exception::class.java) { Socket("127.0.0.1", local).close() }
+                // A connect to a released ephemeral port can hit a reused port. Rebinding checks
+                // that our listening socket released ownership, without assuming the port stays unused.
+                ServerSocket().use { probe ->
+                    probe.reuseAddress = true
+                    probe.bind(java.net.InetSocketAddress("127.0.0.1", local))
+                }
             }
             ServerSocket(0, 1, java.net.InetAddress.getByName("127.0.0.1")).use { server ->
                 val accepted = CountDownLatch(1)
