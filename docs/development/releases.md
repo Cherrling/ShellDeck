@@ -10,7 +10,7 @@ main 的 CI 完成且成功后，通过 `workflow_run` 自动触发 Release。�
 - 每次应用代码更新在推送前递增 `version.properties` 中的 versionCode，沿用同一签名。
 - rolling tag 指向当前安装包的源码提交，允许自动更新这个固定 tag；正式版本 `v*` tag 仍不可覆盖。
 - Release 同时提供对应源码归档和 SHA256SUMS。更新安装不清除应用数据。
-- versionName 不再附加 dev / alpha；当前为 0.1.0、versionCode 6。
+- versionName 不再附加 dev / alpha；实际 versionName / versionCode 以 version.properties 为准。
 - 本地 `cc.cherr.shelldeck.debug` 与正式包仍可并存，但后续不作为用户分发渠道。
 
 
@@ -106,3 +106,7 @@ python3 scripts/configure_signing.py \
 - 不重复用另一套 actions/cache 缓存同一个 Gradle User Home。
 - Release 签名步骤禁用 build cache，整个 release job 的 Gradle 缓存只读。keystore 只恢复到 RUNNER_TEMP，always 步骤清理；密钥、口令及解密文件不上传到 Artifact 或缓存。
 - 缓存缺失仍必须能完整构建。依赖升级时按需变更 SDK key，Gradle 根据输入变化使构建缓存失效。
+
+## 构建追踪
+
+Release 工作流在校验源码时生成一次 `YYYY-MM-DD HH:mm:ss UTC`，通过 SHELLDECK_BUILD_TIME 和 SHELLDECK_SOURCE_REVISION 写入 APK。设置页显示版本号、版本码、同一 UTC 时间和提交短 SHA。发布标题及说明带时间戳，附件 build-info.json 保存完整版本/时间/提交，并受 SHA256SUMS 校验。APK 和源码包文件名继续固定，下载链接不变。未指定这些环境变量的本地构建明确显示未记录时间/local，不冒充正式 CI 构建。

@@ -40,12 +40,12 @@ class ShellDeckModel(application: Application) : AndroidViewModel(application) {
     val backup = cc.cherr.shelldeck.backup.BackupController(application, runtime) { refresh(); updateSettings(settingsStore.read()) }
     val busy get() = working || backup.busy
     var error by mutableStateOf<String?>(null); private set
-    init { runtime.attachUi(); refresh(); reloadFonts(); applyPalette(settings.palette) }
+    init { runtime.attachUi(); refresh(); reloadFonts(); applyPalette(settings) }
     fun updateSettings(value: AppSettings) {
         settingsStore.save(value)
         val old = settings; settings = value
         if (old.backgroundMode != value.backgroundMode) runtime.changeMode(value.backgroundMode)
-        if (old.palette != value.palette) applyPalette(value.palette)
+        if (old.palette != value.palette || old.terminalTheme != value.terminalTheme) applyPalette(value)
         if (old.fontId != value.fontId) reloadFonts()
         sessionManager.sessions.forEach { it.terminal.appearance(typeface, value.fontSize) }
     }
@@ -53,14 +53,14 @@ class ShellDeckModel(application: Application) : AndroidViewModel(application) {
         val size = (settings.fontSize + delta).coerceIn(8, 32)
         if (size != settings.fontSize) updateSettings(settings.copy(fontSize = size))
     }
-    private fun applyPalette(palette: TerminalPalette) {
+    private fun applyPalette(value: AppSettings) {
         val properties = java.util.Properties()
-        if (palette == TerminalPalette.LIGHT) {
+        if (value.palette == TerminalPalette.LIGHT) {
             properties.setProperty("foreground", "#202020"); properties.setProperty("background", "#ffffff")
             properties.setProperty("cursor", "#202020")
         }
-        TerminalColors.COLOR_SCHEME.updateWith(properties)
-        sessionManager.sessions.forEach { it.terminal.colorsChanged() }
+        TerminalColors.COLOR_SCHEME.updateWith(value.terminalTheme?.properties() ?: properties)
+        sessionManager.sessions.forEach { it.terminal.selectionTheme = value.terminalTheme; it.terminal.colorsChanged() }
     }
     private fun reloadFonts() {
         val request = ++fontRequest; val selected = settings.fontId
@@ -244,7 +244,7 @@ class ShellDeckModel(application: Application) : AndroidViewModel(application) {
         val connection = sessionManager.connect(host, secret)
         if (sessionManager.sessions.size > before) markUsed(connection.host)
         runtime.userRequestedConnection()
-        sessionManager.selected?.terminal?.appearance(typeface, settings.fontSize)
+        sessionManager.selected?.terminal?.let { it.selectionTheme = settings.terminalTheme; it.appearance(typeface, settings.fontSize) }
     }
     override fun onCleared() {
         cleared = true; backup.close(); runtime.detachUi()

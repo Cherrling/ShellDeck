@@ -28,6 +28,8 @@ class TerminalController(private val app: Application, private val finished: () 
     }
     var backgroundColor by mutableIntStateOf(TerminalColors.COLOR_SCHEME.mDefaultColors[TextStyle.COLOR_INDEX_BACKGROUND]); private set
     var foregroundColor by mutableIntStateOf(TerminalColors.COLOR_SCHEME.mDefaultColors[TextStyle.COLOR_INDEX_FOREGROUND]); private set
+    var selectionTheme: cc.cherr.shelldeck.settings.TerminalTheme? = null
+        set(value) { field = value; terminalView?.invalidate() }
     private var face: Typeface = Typeface.MONOSPACE
     private var fontSize = 14
     fun appearance(typeface: Typeface, size: Int) {
@@ -78,7 +80,7 @@ class TerminalController(private val app: Application, private val finished: () 
         if (session.isReady && terminalView != null) session.emulator?.paste(request.text)
     }
     fun createView(context: android.content.Context): TerminalView = ShellTerminalView(context,
-        { onPasteTextFromClipboard(session) }, ::requestPaste).also {
+        { onPasteTextFromClipboard(session) }, ::requestPaste, { selectionTheme }).also {
         viewReference = java.lang.ref.WeakReference(it)
         it.setTerminalViewClient(this)
         it.setTextSize(android.util.TypedValue.applyDimension(android.util.TypedValue.COMPLEX_UNIT_SP, fontSize.toFloat(), context.resources.displayMetrics).toInt())

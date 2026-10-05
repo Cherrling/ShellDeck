@@ -5,7 +5,7 @@ from pathlib import Path
 
 root = Path(__file__).resolve().parents[1] / "third-party" / "termux"
 manifest = json.loads((root / "upstream-files.json").read_text())
-patched = {"terminal-emulator/src/main/java/com/termux/terminal/TerminalSession.java", "terminal-view/src/main/java/com/termux/view/TerminalView.java"}
+patched = {"terminal-emulator/src/main/java/com/termux/terminal/TerminalSession.java", "terminal-view/src/main/java/com/termux/view/TerminalView.java", "terminal-view/src/main/java/com/termux/view/TerminalRenderer.java"}
 for name, expected in manifest["files"].items():
     data = (root / name).read_bytes()
     if name == "terminal-view/src/main/java/com/termux/view/TerminalView.java":
@@ -13,6 +13,8 @@ for name, expected in manifest["files"].items():
         if hashlib.sha256(restored).hexdigest() != expected:
             raise SystemExit("TerminalView may only remove the class final modifier")
     actual = hashlib.sha256(data).hexdigest()
+    if name.endswith("/TerminalRenderer.java") and actual != "22c98c0b7bdef054eb7a8ddcbf7c7f56ae060d1e4211b120cc7ae4965e47dd0e":
+        raise SystemExit("Renderer differs from documented selection-color patch")
     if name not in patched and actual != expected:
         raise SystemExit(f"Unexpected upstream modification: {name}")
-print(f"Verified {len(manifest['files']) - len(patched)} unchanged upstream files; two documented boundary patches")
+print(f"Verified {len(manifest['files']) - len(patched)} unchanged upstream files; three documented patches")

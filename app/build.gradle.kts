@@ -15,6 +15,11 @@ val signingVariables = listOf(
 )
 val signingValues = signingVariables.associateWith { providers.environmentVariable(it).orNull }
 
+val buildTime = providers.environmentVariable("SHELLDECK_BUILD_TIME").orElse("Local build (unrecorded)").get()
+val sourceRevision = providers.environmentVariable("SHELLDECK_SOURCE_REVISION").orElse("local").get()
+require(buildTime == "Local build (unrecorded)" || Regex("\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2} UTC").matches(buildTime))
+require(sourceRevision == "local" || Regex("[0-9a-f]{40}").matches(sourceRevision))
+
 android {
     namespace = "cc.cherr.shelldeck"
     compileSdk = 36
@@ -28,6 +33,8 @@ android {
         targetSdk = 36
         versionCode = appVersion.getProperty("versionCode").toInt()
         versionName = appVersion.getProperty("versionName")
+        buildConfigField("String", "BUILD_TIME", "\"$buildTime\"")
+        buildConfigField("String", "SOURCE_REVISION", "\"${sourceRevision.take(12)}\"")
     }
 
     signingConfigs {
@@ -60,7 +67,7 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     sourceSets.getByName("androidTest").assets.srcDir("schemas")
-    buildFeatures { compose = true }
+    buildFeatures { compose = true; buildConfig = true }
     packaging {
         resources.excludes += setOf("META-INF/versions/9/OSGI-INF/MANIFEST.MF")
         resources.merges += setOf("META-INF/LICENSE.md", "META-INF/NOTICE.md", "META-INF/LICENSE", "META-INF/NOTICE")

@@ -13,7 +13,7 @@ enum class TerminalPalette { DARK, LIGHT }
 data class AppSettings(val theme: ThemeMode = ThemeMode.SYSTEM, val dynamicColor: Boolean = true,
     val fontId: String = "maple", val fontSize: Int = 14, val palette: TerminalPalette = TerminalPalette.DARK,
     val keyboard: KeyboardProfile = KeyboardProfile.default(), val keyboardSizing: KeyboardSizing = KeyboardSizing(),
-    val backgroundMode: BackgroundMode = BackgroundMode.NORMAL)
+    val backgroundMode: BackgroundMode = BackgroundMode.NORMAL, val terminalTheme: TerminalTheme? = null)
 
 /** Non-secret preferences only. SSH credentials never enter this store. */
 class SettingsStore(context: Context, name: String = "appearance_and_keyboard") {
@@ -42,7 +42,7 @@ class SettingsStore(context: Context, name: String = "appearance_and_keyboard") 
             }
             val root = JSONObject(text)
             if (strict) {
-                require(root.get("version") == 1 && root.get("size") is Int && root.get("dynamic") is Boolean)
+                require(root.get("version") in listOf(1, 2) && root.get("size") is Int && root.get("dynamic") is Boolean)
                 listOf("theme", "font", "palette", "backgroundMode").forEach { require(root.get(it) is String) }
                 require(root.getJSONArray("keyboard").length() == 2)
                 val sizing = root.getJSONObject("keyboardSizing")
@@ -55,12 +55,14 @@ class SettingsStore(context: Context, name: String = "appearance_and_keyboard") 
                 root.optJSONObject("keyboardSizing")?.let { KeyboardSizing(it.optInt("height", 38).let { n -> if (strict) n else n.coerceIn(28, 56) },
                     it.optInt("visibleKeys", 7).let { n -> if (strict) n else n.coerceIn(4, 12) }) } ?: KeyboardSizing(),
                 if (strict) BackgroundMode.valueOf(root.optString("backgroundMode", "NORMAL"))
-                else BackgroundMode.entries.firstOrNull { it.name == root.optString("backgroundMode") } ?: BackgroundMode.NORMAL)
+                else BackgroundMode.entries.firstOrNull { it.name == root.optString("backgroundMode") } ?: BackgroundMode.NORMAL,
+                if (root.has("terminalTheme") && !root.isNull("terminalTheme")) TerminalTheme.fromJson(root.getJSONObject("terminalTheme")) else null)
                 .also { require(it.fontSize in 8..32 && it.fontId.length <= 128); it.keyboard.validate(); it.keyboardSizing.validate() }
         }
         fun encode(settings: AppSettings): String {
             settings.keyboard.validate(); settings.keyboardSizing.validate(); require(settings.fontSize in 8..32)
-            return JSONObject().put("version", 1).put("theme", settings.theme.name).put("dynamic", settings.dynamicColor)
+            return JSONObject().put("version", 2).put("theme", settings.theme.name).put("dynamic", settings.dynamicColor)
+                .put("terminalTheme", settings.terminalTheme?.json() ?: JSONObject.NULL)
                 .put("font", settings.fontId).put("size", settings.fontSize).put("palette", settings.palette.name)
                 .put("backgroundMode", settings.backgroundMode.name).put("keyboard", encodeKeyboard(settings.keyboard))
                 .put("keyboardSizing", JSONObject().put("height", settings.keyboardSizing.rowHeight).put("visibleKeys", settings.keyboardSizing.visibleKeys)).toString()

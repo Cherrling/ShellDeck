@@ -2,10 +2,19 @@ import tempfile
 from pathlib import Path
 import unittest
 
-from release import read_version, validate_tag, validate_apk_output
+from release import read_version, validate_tag, validate_apk_output, build_metadata
 
 
 class ReleaseValidationTest(unittest.TestCase):
+    def test_build_metadata_rejects_ambiguous_dates_and_revisions(self):
+        info = build_metadata("0.1.0", 13, "2026-10-05 15:00:00 UTC", "ab" * 20)
+        self.assertEqual(info["versionCode"], 13)
+        self.assertEqual(info["buildTime"], "2026-10-05 15:00:00 UTC")
+        for date, revision in (("2026-10-05 15:00:00", "ab" * 20), ("2026-02-30 15:00:00 UTC", "ab" * 20),
+                               ("2026-10-05 15:00:00 UTC", "invalid")):
+            with self.assertRaises(ValueError):
+                build_metadata("0.1.0", 13, date, revision)
+
     def test_tag_must_match_and_rejects_shell_payloads(self):
         validate_tag("v0.1.0-alpha.1", "0.1.0-alpha.1")
         for tag in ("v0.1.0", "0.1.0-alpha.1", "v0.1.0;echo bad", "v0.1.0\n"):

@@ -22,6 +22,14 @@ import com.termux.terminal.WcWidth;
  */
 public final class TerminalRenderer {
 
+    private int selectionForeground, selectionBackground;
+
+    /** ShellDeck opt-in selection colors. Zero retains upstream inverse selection. */
+    public void setSelectionColors(int foreground, int background) {
+        selectionForeground = foreground;
+        selectionBackground = background;
+    }
+
     final int mTextSize;
     final Typeface mTypeface;
     private final Paint mTextPaint = new Paint();
@@ -147,7 +155,7 @@ public final class TerminalRenderer {
                         }
                         drawTextRun(canvas, line, palette, heightOffset, lastRunStartColumn, columnWidthSinceLastRun,
                             lastRunStartIndex, charsSinceLastRun, measuredWidthForRun,
-                            cursorColor, cursorShape, lastRunStyle, reverseVideo || invertCursorTextColor || lastRunInsideSelection);
+                            cursorColor, cursorShape, lastRunStyle, reverseVideo || invertCursorTextColor || lastRunInsideSelection, lastRunInsideSelection);
                     }
                     measuredWidthForRun = 0.f;
                     lastRunStyle = style;
@@ -175,13 +183,13 @@ public final class TerminalRenderer {
                 invertCursorTextColor = true;
             }
             drawTextRun(canvas, line, palette, heightOffset, lastRunStartColumn, columnWidthSinceLastRun, lastRunStartIndex, charsSinceLastRun,
-                measuredWidthForRun, cursorColor, cursorShape, lastRunStyle, reverseVideo || invertCursorTextColor || lastRunInsideSelection);
+                measuredWidthForRun, cursorColor, cursorShape, lastRunStyle, reverseVideo || invertCursorTextColor || lastRunInsideSelection, lastRunInsideSelection);
         }
     }
 
     private void drawTextRun(Canvas canvas, char[] text, int[] palette, float y, int startColumn, int runWidthColumns,
                              int startCharIndex, int runWidthChars, float mes, int cursor, int cursorStyle,
-                             long textStyle, boolean reverseVideo) {
+                             long textStyle, boolean reverseVideo, boolean selected) {
         int foreColor = TextStyle.decodeForeColor(textStyle);
         final int effect = TextStyle.decodeEffect(textStyle);
         int backColor = TextStyle.decodeBackColor(textStyle);
@@ -209,6 +217,13 @@ public final class TerminalRenderer {
             backColor = tmp;
         }
 
+        // Selection is a UI overlay; it does not change terminal cells or OSC palette queries.
+        if (selected && selectionForeground != 0 && selectionBackground != 0) {
+            foreColor = selectionForeground;
+            backColor = selectionBackground;
+            cursor = 0;
+        }
+
         float left = startColumn * mFontWidth;
         float right = left + runWidthColumns * mFontWidth;
 
@@ -222,7 +237,7 @@ public final class TerminalRenderer {
             savedMatrix = true;
         }
 
-        if (backColor != palette[TextStyle.COLOR_INDEX_BACKGROUND]) {
+        if (backColor != palette[TextStyle.COLOR_INDEX_BACKGROUND] || (selected && selectionForeground != 0 && selectionBackground != 0)) {
             // Only draw non-default background.
             mTextPaint.setColor(backColor);
             canvas.drawRect(left, y - mFontLineSpacingAndAscent + mFontAscent, right, y, mTextPaint);
@@ -237,7 +252,7 @@ public final class TerminalRenderer {
         }
 
         if ((effect & TextStyle.CHARACTER_ATTRIBUTE_INVISIBLE) == 0) {
-            if (dim) {
+            if (dim && !(selected && selectionForeground != 0 && selectionBackground != 0)) {
                 int red = (0xFF & (foreColor >> 16));
                 int green = (0xFF & (foreColor >> 8));
                 int blue = (0xFF & foreColor);

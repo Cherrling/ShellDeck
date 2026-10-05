@@ -22,8 +22,9 @@ import org.json.JSONArray
 @Composable
 fun SettingsScreen(model: ShellDeckModel, onIdentities: () -> Unit = {}, onEditorVisibilityChanged: (Boolean) -> Unit = {}, onBack: () -> Unit) {
     var editing by rememberSaveable { mutableStateOf(false) }
-    DisposableEffect(editing) {
-        onEditorVisibilityChanged(editing)
+    var editingColors by rememberSaveable { mutableStateOf(false) }
+    DisposableEffect(editing, editingColors) {
+        onEditorVisibilityChanged(editing || editingColors)
         onDispose { onEditorVisibilityChanged(false) }
     }
     var rename by remember { mutableStateOf<FontEntry?>(null) }
@@ -32,6 +33,11 @@ fun SettingsScreen(model: ShellDeckModel, onIdentities: () -> Unit = {}, onEdito
     if (editing) { KeyboardEditor(model.settings.keyboard, model.settings.keyboardSizing, { editing = false }) {
         model.updateSettings(model.settings.copy(keyboard = it)); editing = false
     }; return }
+    if (editingColors) {
+        TerminalThemeEditor(model.settings.terminalTheme ?: TerminalTheme.preset(model.settings.palette), model.typeface,
+            { editingColors = false }) { model.updateSettings(model.settings.copy(terminalTheme = it)); editingColors = false }
+        return
+    }
     BackHandler(onBack = onBack)
     val settings = model.settings
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -68,11 +74,13 @@ fun SettingsScreen(model: ShellDeckModel, onIdentities: () -> Unit = {}, onEdito
         Slider(size, { size = it }, valueRange = 8f..32f, steps = 23,
             onValueChangeFinished = { model.updateSettings(settings.copy(fontSize = size.toInt())) })
         Text("终端配色（独立于 App 外观）")
-        Choices(TerminalPalette.entries, settings.palette, { if (it == TerminalPalette.DARK) "深色终端" else "浅色终端" }) {
-            model.updateSettings(settings.copy(palette = it))
+        Choices(TerminalPalette.entries, settings.palette.takeIf { settings.terminalTheme == null }, { if (it == TerminalPalette.DARK) "深色终端" else "浅色终端" }) {
+            model.updateSettings(settings.copy(palette = it, terminalTheme = null))
         }
-        Surface(color = if (settings.palette == TerminalPalette.DARK) androidx.compose.ui.graphics.Color.Black else androidx.compose.ui.graphics.Color.White,
-            contentColor = if (settings.palette == TerminalPalette.DARK) androidx.compose.ui.graphics.Color.White else androidx.compose.ui.graphics.Color.Black) {
+        Text(if (settings.terminalTheme != null) "当前使用自定义配色" else "当前使用内置配色")
+        TextButton(onClick = { editingColors = true }) { Text("编辑终端配色") }
+        val previewTheme = settings.terminalTheme ?: TerminalTheme.preset(settings.palette)
+        Surface(color = androidx.compose.ui.graphics.Color(previewTheme.colors[17]), contentColor = androidx.compose.ui.graphics.Color(previewTheme.colors[16])) {
             Text("Aa 0123 [] {} <>\n中文等宽测试  ┌─┬─┐\n图标：\uE0B0 \uF120 \uF07B", Modifier.fillMaxWidth().padding(12.dp),
                 fontFamily = FontFamily(model.typeface), fontSize = size.sp)
         }
@@ -88,6 +96,11 @@ fun SettingsScreen(model: ShellDeckModel, onIdentities: () -> Unit = {}, onEdito
         BackgroundSettings(settings.backgroundMode, model.backgroundError) {
             model.updateSettings(model.settings.copy(backgroundMode = it))
         }
+        HorizontalDivider()
+        Text("关于 ShellDeck", style = MaterialTheme.typography.titleLarge)
+        Text("版本 ${cc.cherr.shelldeck.BuildConfig.VERSION_NAME}（${cc.cherr.shelldeck.BuildConfig.VERSION_CODE}）")
+        Text("构建时间：${if (cc.cherr.shelldeck.BuildConfig.BUILD_TIME == "Local build (unrecorded)") "本地构建（未记录）" else cc.cherr.shelldeck.BuildConfig.BUILD_TIME}")
+        Text("提交：${cc.cherr.shelldeck.BuildConfig.SOURCE_REVISION}", style = MaterialTheme.typography.bodySmall)
     }
     rename?.let { font ->
         var label by remember(font.id) { mutableStateOf(font.label) }
@@ -103,7 +116,7 @@ fun SettingsScreen(model: ShellDeckModel, onIdentities: () -> Unit = {}, onEdito
 }
 
 @Composable
-private fun <T> Choices(options: List<T>, selected: T, label: (T) -> String, choose: (T) -> Unit) {
+private fun <T> Choices(options: List<T>, selected: T?, label: (T) -> String, choose: (T) -> Unit) {
     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         options.forEach { item -> FilterChip(selected == item, onClick = { choose(item) }, label = { Text(label(item)) }) }
     }

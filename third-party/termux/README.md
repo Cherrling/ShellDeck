@@ -4,9 +4,11 @@
 
 仅导入 terminal-emulator / terminal-view 的 Java 源码、资源、manifest 与 emulator 测试；未导入 Termux app、userspace、JNI 或本地进程实现。根许可证见 UPSTREAM-LICENSE.md，保留源文件原有许可头。项目采用 GPL-3.0-only；部分上游文件另有 Apache-2.0 声明。
 
-TerminalSession.java 的接入补丁：把本地进程接入替换为异步 TerminalTransport，使用有界 ByteQueue，并在主线程操作 emulator。原始差异见 patches/0001-transport-session.patch。新增 TerminalTransport、TerminalSize、ResizeCoordinator、TransportSessionTest 以及两个 Gradle 模块配置。解析器、渲染器和原始测试保持原样。
+TerminalSession.java 的接入补丁：把本地进程接入替换为异步 TerminalTransport，使用有界 ByteQueue，并在主线程操作 emulator。原始差异见 patches/0001-transport-session.patch。新增 TerminalTransport、TerminalSize、ResizeCoordinator、TransportSessionTest 以及两个 Gradle 模块配置。解析器和原始测试保持原样。
 
 TerminalView.java 仅移除类声明的 `final`（patches/0002-extensible-terminal-view.patch），允许 App 子类统一中键/IME 粘贴策略，以及可见时按帧合并刷新。其方法体、选区、滚动和解析行为不修改。
+
+TerminalRenderer 的可选选区前景/背景补丁见 patches/0003-selection-colors.patch；未配置时保持上游反色行为，不修改协议颜色和 cell 样式。
 
 upstream-files.json 记录导入时的 SHA256。`python3 scripts/check_termux.py` 验证未修改文件与来源清单一致。升级时重新下载固定 commit，对照补丁更新会话接口，并运行所有上游和接入测试；不得直接覆盖定制会话。
 

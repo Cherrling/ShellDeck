@@ -8,11 +8,17 @@ import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputConnectionWrapper
 import com.termux.view.TerminalView
 
-/** App policy at the View boundary; upstream parser, renderer and selection stay untouched. */
+/** App policy at the View boundary; upstream parser and selection gestures stay untouched. */
 // Constructed by AndroidView with required input policy, never inflated from XML.
 @android.annotation.SuppressLint("ViewConstructor")
 class ShellTerminalView(context: Context, private val paste: () -> Unit,
-    private val pasteText: (String) -> Unit) : TerminalView(context, null) {
+    private val pasteText: (String) -> Unit,
+    private val selectionTheme: () -> cc.cherr.shelldeck.settings.TerminalTheme? = { null }) : TerminalView(context, null) {
+    override fun onDraw(canvas: android.graphics.Canvas) {
+        val theme = selectionTheme()
+        mRenderer?.setSelectionColors(theme?.colors?.get(19) ?: 0, theme?.colors?.get(20) ?: 0)
+        super.onDraw(canvas)
+    }
     private var dirty = false
     private var scheduled = false
     private var released = false

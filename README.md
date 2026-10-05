@@ -14,7 +14,8 @@
 - 断线后仅保留旧终端内容供查看，不提供手动重连入口。需要继续操作时，由用户回服务器页面新建连接，旧会话保持独立。连接尚未就绪时重复点击会选中已有尝试；已连接后允许另开会话。
 - 内置 Maple Mono NF CN Regular，支持系统字体和导入 TTF / OTF、重命名、删除、字号及预览。终端内可用音量 ＋ / − 调整字号。
 - 正常连接时隐藏独立标题栏，快捷键占满整行，右下角不再放管理按钮。系统栏图标跟随实际页面/终端背景，深色终端使用浅色图标。
-- App 支持跟随系统/明亮/深色与动态配色；终端默认前景/背景独立设置。
+- App 支持跟随系统/明亮/深色与动态配色；终端独立编辑 ANSI 16 色、前景、背景、光标和选区颜色，提供真实终端预览、JSON 导入导出和常见 Termux colors.properties 导入。保存后应用到现有与新建会话，自定义配色随加密备份保存。
+- 设置页“关于 ShellDeck”显示版本号、版本码、UTC 构建时间和提交短 SHA；发布标题/说明带同一时间戳，并提供 build-info.json。固定 APK 下载链接不变。
 - SSH 身份支持本机生成 Ed25519（默认）或 RSA 3072，可选私钥口令；也支持 OpenSSH / PEM / PKCS#8 导入。每把密钥均可查看、复制公钥或通过系统文件选择器导出 OpenSSH `.pub`。旧身份首次提取公钥时仅在需要解密的情况下询问口令，之后查看公钥无需再次解锁。私钥始终经 Keystore 加密保存。
 - 设置中提供加密备份与恢复，包含主机、身份、启动命令和设置；支持恢复预览及逐项选择保留本机、覆盖或导入副本。恢复用新设备的 Keystore 重新加密私钥。导入字体文件和服务器信任记录不迁移。
 - 私钥支持标准 PKCS#8 PEM 导出，默认使用口令保护，也允许用户显式选择无口令导出。原私钥口令只在确实需要解锁时询问；不修改本机原密钥。整包备份始终要求密码。
@@ -62,6 +63,7 @@ APK 在 `app/build/outputs/apk/debug/app-debug.apk`。测试命令需要本机 O
 - push `v*` tag：检查版本与来源，测试、lint、签名构建、验签，发布 GitHub Release。
 - GitHub 仓库：[Cherrling/ShellDeck](https://github.com/Cherrling/ShellDeck)。后续正式发布使用已配置的固定签名 Secrets。详见 [发布说明](docs/development/releases.md)。
 - [后台会话与通知](docs/development/background-connections.md)。
+- [Rolling code 13 配色与版本追踪验证](docs/development/rolling-code13-validation.md)。
 - [Rolling code 12 终端交互、刷新与 SFTP 验证](docs/development/rolling-code12-validation.md)。
 - [Rolling code 11 本地验证](docs/development/rolling-code11-validation.md)。
 - [Rolling code 10 本地验证](docs/development/rolling-code10-validation.md)。

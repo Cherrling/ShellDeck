@@ -1,5 +1,6 @@
 """Validate release inputs and the signed APK; uses only Python's standard library."""
 
+from datetime import datetime
 import argparse
 import json
 import os
@@ -59,15 +60,26 @@ def validate_apk_output(badging: str, signatures: str, version: str, code: int, 
         raise ValueError("APK signer does not match the configured release certificate")
 
 
+def build_metadata(version: str, code: int, timestamp: str, revision: str) -> dict:
+    parsed = datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S UTC")
+    if parsed.strftime("%Y-%m-%d %H:%M:%S UTC") != timestamp or not re.fullmatch(r"[0-9a-f]{40}", revision):
+        raise ValueError("Invalid build timestamp or source revision")
+    return {"versionName": version, "versionCode": code, "buildTime": timestamp, "sourceRevision": revision}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
     validate = sub.add_parser("validate")
     validate.add_argument("tag", nargs="?")
+    sub.add_parser("metadata")
     verify = sub.add_parser("verify-apk")
     verify.add_argument("apk", type=Path)
     args = parser.parse_args()
     version, code = read_version(ROOT / "version.properties")
+    if args.command == "metadata":
+        print(json.dumps(build_metadata(version, code, os.environ["SHELLDECK_BUILD_TIME"], os.environ["SHELLDECK_SOURCE_REVISION"]), indent=2))
+        return
     if args.command == "validate":
         if args.tag is not None:
             validate_tag(args.tag, version)

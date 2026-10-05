@@ -56,3 +56,5 @@ SSHJ 完成原私钥解析，需要原口令时才提示。复用固定 BC 1.86 
 该格式可由 ShellDeck、OpenSSL 和支持 PKCS#8 的工具读取；不承诺每个工具原生支持所有算法的 PKCS#8 格式。GCM 完整性认证适用于整包备份，不把标准 CBC 加密 PEM 宣称为认证加密。
 
 系统选择器使用 `application/octet-stream`，避免默认添加 `.txt`。待导出字节只在 ViewModel 所属对象中保存：默认是密文，显式无口令导出时为临时内存中的明文；不放入 SavedState。旋转保留流程，进程死亡后要求重新导出；文件选择器取消会清理字节，不写文件。
+
+从 rolling code 13 起，settings JSON 写入版本 2，包含可空 terminalTheme（21 个不透明 RGB 色）。读取继续兼容 settings v1；整包备份外层和 payload 版本均不变。含 v2 设置的备份需要新版 App 恢复。

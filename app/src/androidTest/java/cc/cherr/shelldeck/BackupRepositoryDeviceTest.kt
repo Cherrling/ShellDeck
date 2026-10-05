@@ -33,7 +33,8 @@ class BackupRepositoryDeviceTest {
                 id = "host"; label = "Source host"; hostname = "example.com"; username = "dev"; identityId = "identity"
                 startupCommand = "tmux new-session -A -s codex"; favorite = true; lastUsedAt = 42
             })
-            sourceSettings.saveRestored(AppSettings(theme = ThemeMode.DARK, fontSize = 21, fontId = "missing-imported-font"))
+            val colors = TerminalTheme.preset(TerminalPalette.LIGHT).withColor(2, TerminalTheme.parse("#226688"))
+            sourceSettings.saveRestored(AppSettings(theme = ThemeMode.DARK, fontSize = 21, fontId = "missing-imported-font", terminalTheme = colors))
             targetDb.records().saveKnownHost(KnownHostRecord().apply {
                 hostname = "example.com"; port = 22; algorithm = "ssh-ed25519"; fingerprint = "SHA256:local-pin"
             })
@@ -54,6 +55,7 @@ class BackupRepositoryDeviceTest {
             assertArrayEquals(bytes, targetVault.decrypt(restored.id, restored.encryptedKey))
             assertThrows(Exception::class.java) { sourceVault.decrypt(restored.id, restored.encryptedKey) }
             assertEquals(21, targetSettings.read().fontSize)
+            assertEquals(colors, targetSettings.read().terminalTheme)
             val local = targetDb.records().host("host")!!.apply { label = "Local edit" }
             targetDb.records().saveHost(local)
             target.prepare(file, password).use { target.restore(it, emptyMap(), emptyMap(), false) }
