@@ -48,7 +48,10 @@ jobs:
         run: sdkmanager 'platforms;android-36' 'build-tools;35.0.0' 'platform-tools'
       - name: Prepare isolated SSH integration tests
         run: |
-          command -v sshd || (sudo apt-get update && sudo apt-get install -y openssh-server)
+          if ! command -v sshd >/dev/null || ! command -v tmux >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y openssh-server tmux
+          fi
           sudo mkdir -p /run/sshd
       - name: Check release metadata and validation logic
         run: |

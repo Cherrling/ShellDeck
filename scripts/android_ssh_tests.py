@@ -9,6 +9,7 @@ import subprocess
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--serial", required=True)
+    parser.add_argument("--test-class", help="Optional instrumentation class filter")
     args = parser.parse_args()
     # Gradle also needs the selected serial when multiple emulators are connected.
     os.environ["ANDROID_SERIAL"] = args.serial
@@ -16,6 +17,7 @@ def main():
     port = os.environ["SSH_TEST_PORT"]
     adb = [str(Path(os.environ["ANDROID_HOME"]) / "platform-tools/adb"), "-s", args.serial]
     app = "cc.cherr.shelldeck.debug"
+    (root / "device-files").mkdir(exist_ok=True)
     subprocess.run(["./gradlew", ":app:installDebug", ":app:assembleDebugAndroidTest", "--console=plain"], check=True)
     subprocess.run(adb + ["reverse", f"tcp:{port}", f"tcp:{port}"], check=True)
     try:
@@ -28,7 +30,9 @@ def main():
             subprocess.run(adb + ["shell", "pm", "revoke", app, "android.permission.POST_NOTIFICATIONS"], check=True)
         result = subprocess.run(["./gradlew", ":app:connectedDebugAndroidTest", "--console=plain",
             f"-Pandroid.testInstrumentationRunnerArguments.sshPort={port}",
-            f"-Pandroid.testInstrumentationRunnerArguments.sshUser={os.environ['SSH_TEST_USER']}"])
+            f"-Pandroid.testInstrumentationRunnerArguments.sshUser={os.environ['SSH_TEST_USER']}",
+            f"-Pandroid.testInstrumentationRunnerArguments.sftpDirectory={root}/device-files"] +
+            ([f"-Pandroid.testInstrumentationRunnerArguments.class={args.test_class}"] if args.test_class else []))
         return result.returncode
     finally:
         subprocess.run(adb + ["shell", "run-as", app, "rm", "-f", "files/test-ssh-key"], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

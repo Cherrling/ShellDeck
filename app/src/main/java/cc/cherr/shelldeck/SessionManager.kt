@@ -53,6 +53,8 @@ class SessionConnection(application: Application, val host: HostRecord, dao: Sto
     private var pendingPassphrase: CompletableFuture<CharArray?>? = null
     private val password = secret.toCharArray()
     val terminal = TerminalController(application) { finish() }
+    private lateinit var transport: SshTransport
+    val files by lazy { cc.cherr.shelldeck.sftp.SftpController(application) { transport.openSftp() } }
     init {
         val verifier = HostTrust(host.hostname, host.port,
             read = { dao.knownHost(host.hostname, host.port)?.let { HostPin(it.algorithm, it.fingerprint) } },
@@ -72,7 +74,7 @@ class SessionConnection(application: Application, val host: HostRecord, dao: Sto
                     main.post { if (pendingTrust === future) { pendingTrust = null; challenge = null } }
                 }
             })
-        val transport = SshTransport(host.hostname, host.port, host.username, verifier,
+        transport = SshTransport(host.hostname, host.port, host.username, verifier,
             authenticate = { client ->
                 try {
                     val identityId = host.identityId
@@ -114,6 +116,7 @@ class SessionConnection(application: Application, val host: HostRecord, dao: Sto
     }
     private fun finish() {
         if (ended) return
+        files.close()
         ended = true; if (!state.terminal) state = ConnectionState.ENDED; password.fill('\u0000')
         pendingTrust?.complete(TrustDecision.CANCEL); pendingTrust = null; challenge = null
         pendingPassphrase?.complete(null); pendingPassphrase = null; passphraseIdentity = null

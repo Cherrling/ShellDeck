@@ -109,6 +109,7 @@ private fun ShellDeckApp(model: ShellDeckModel, activity: MainActivity) {
     var addingIdentity by remember { mutableStateOf(false) }
     var generating by remember { mutableStateOf(false) }
     var login by remember { mutableStateOf<HostRecord?>(null) }
+    var filesSession by rememberSaveable { mutableStateOf<String?>(null) }
     var closing by remember { mutableStateOf<String?>(null) }
     var page by rememberSaveable { mutableStateOf(MainPage.HOSTS) }
     var showIdentities by rememberSaveable { mutableStateOf(false) }
@@ -211,6 +212,9 @@ private fun ShellDeckApp(model: ShellDeckModel, activity: MainActivity) {
                                     }, style = MaterialTheme.typography.bodyMedium, maxLines = 1,
                                         overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                                 }
+                                IconButton(enabled = session.connected, onClick = { filesSession = session.id }) {
+                                    Icon(painterResource(R.drawable.ic_folder), contentDescription = "浏览 ${session.host.label} 的文件")
+                                }
                                 IconButton(onClick = { closing = session.id }, modifier = Modifier.testTag("close-session-${session.id}")) {
                                     Icon(painterResource(R.drawable.ic_close), contentDescription = "关闭 ${session.host.label} 的会话 ${session.number}")
                                 }
@@ -278,6 +282,9 @@ private fun ShellDeckApp(model: ShellDeckModel, activity: MainActivity) {
                 }
             }
         }
+    }
+    manager.sessions.firstOrNull { it.id == filesSession }?.let { session ->
+        cc.cherr.shelldeck.sftp.SftpScreen(session) { filesSession = null }
     }
     terminal?.let { cc.cherr.shelldeck.terminal.PasteDialog(it) }
     if (hostEditor) HostEditor(editing, model.identities, onDismiss = { hostEditor = false }) { label, hostname, port, username, identity, startup ->

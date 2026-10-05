@@ -72,6 +72,7 @@ X11Forwarding no
 PermitTunnel no
 PrintMotd no
 SetEnv LANG=C.UTF-8 LC_ALL=C.UTF-8
+Subsystem sftp /usr/lib/openssh/sftp-server
 ForceCommand {root}/test-shell
 LogLevel ERROR
 """)

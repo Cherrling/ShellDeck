@@ -100,6 +100,13 @@ class SshTransport(
             }
         }
     }
+    /** Opens an independent subsystem channel on the authenticated transport; worker thread only. */
+    fun openSftp(): net.schmizz.sshj.sftp.SFTPClient {
+        check(!closed.get() && shell != null) { "SSH session is not connected" }
+        val ssh = requireNotNull(client.get())
+        check(ssh.isAuthenticated)
+        return ssh.newSFTPClient()
+    }
     private fun send(action: () -> Unit) {
         if (closed.get()) return
         try { writer.execute {
