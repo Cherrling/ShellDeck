@@ -13,6 +13,7 @@ public interface StoreDao {
     @Query("UPDATE hosts SET lastUsedAt = MAX(lastUsedAt, :timestamp) WHERE id = :id") void markUsed(String id, long timestamp);
     @Upsert void saveHost(HostRecord host);
     @Insert void insertIdentity(IdentityRecord identity);
+    @Upsert void saveIdentity(IdentityRecord identity);
     @Query("UPDATE identities SET publicKey = :publicKey WHERE id = :id") void savePublicKey(String id, String publicKey);
     @Query("DELETE FROM hosts WHERE id = :id") void deleteHost(String id);
     @Query("SELECT COUNT(*) FROM hosts WHERE identityId = :id") int identityUsers(String id);

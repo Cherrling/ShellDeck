@@ -61,7 +61,7 @@ Terminal 是产品核心。优先保证终端兼容性、稳定性、低功耗�
 
 ### 安全
 
-- 禁止将 private key、password、passphrase 明文保存到 Room、SharedPreferences 或普通文件，也不得输出到日志、测试产物或 Git。
+- 禁止将 private key、password、passphrase 明文保存到 Room、SharedPreferences 或普通文件，也不得输出到日志、测试产物或 Git。唯一导出例外：用户已明确要求支持无口令私钥导出；仅在用户主动选择无口令导出并通过系统文件选择器指定目标时写入该文件，不创建明文临时文件。默认导出仍使用口令保护，整包备份必须加密。
 - Android Keystore 不等于任意私钥 blob 仓库。研究由 Keystore 保护 AES key、使用 AES-GCM 加密凭据的方案，结合当前 Android API 和 threat model 设计。
 - 设计必须考虑备份、设备迁移、锁屏、密钥失效、未来生物识别解锁及用户主动导出凭据的边界。
 - 禁止通过无条件接受 Host Key 或类似 `StrictHostKeyChecking=no` 的行为绕过验证。

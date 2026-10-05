@@ -9,8 +9,7 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
 /** Never recreates a missing decryption key: loss of the device key requires re-import. */
-class CredentialVault {
-    private val alias = "shelldeck.credentials.v1"
+class CredentialVault(private val alias: String = "shelldeck.credentials.v1") {
     private fun key(create: Boolean): SecretKey {
         val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
         (store.getKey(alias, null) as? SecretKey)?.let { return it }

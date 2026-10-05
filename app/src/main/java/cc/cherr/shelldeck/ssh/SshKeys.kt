@@ -81,12 +81,21 @@ object SshKeys {
         val generator = java.security.KeyPairGenerator.getInstance(type.jcaName, "BC")
         if (type == GenerationType.RSA3072) generator.initialize(3072, random)
         val pair = generator.generateKeyPair()
+        return encodePkcs8(pair.private, passphrase)
+    }
+
+    fun exportPrivate(key: java.security.PrivateKey, passphrase: CharArray): ByteArray {
+        require(passphrase.isEmpty() || passphrase.size >= 8)
+        configure()
+        return encodePkcs8(key, passphrase)
+    }
+    private fun encodePkcs8(key: java.security.PrivateKey, passphrase: CharArray): ByteArray {
         val encryptor = if (passphrase.isEmpty()) null else
             org.bouncycastle.openssl.jcajce.JceOpenSSLPKCS8EncryptorBuilder(org.bouncycastle.openssl.PKCS8Generator.AES_256_CBC)
-                .setProvider("BC").setRandom(random).setPassword(passphrase)
+                .setProvider("BC").setRandom(java.security.SecureRandom()).setPassword(passphrase)
                 .setPRF(org.bouncycastle.openssl.PKCS8Generator.PRF_HMACSHA256)
                 .setIterationCount(210_000).build()
-        val pem = org.bouncycastle.openssl.jcajce.JcaPKCS8Generator(pair.private, encryptor).generate()
+        val pem = org.bouncycastle.openssl.jcajce.JcaPKCS8Generator(key, encryptor).generate()
         return try {
             ("-----BEGIN ${pem.type}-----\n" + Base64.getMimeEncoder(64, byteArrayOf(10)).encodeToString(pem.content) +
                 "\n-----END ${pem.type}-----\n").toByteArray(Charsets.UTF_8)

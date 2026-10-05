@@ -16,31 +16,56 @@ data class AppSettings(val theme: ThemeMode = ThemeMode.SYSTEM, val dynamicColor
     val backgroundMode: BackgroundMode = BackgroundMode.NORMAL)
 
 /** Non-secret preferences only. SSH credentials never enter this store. */
-class SettingsStore(context: Context) {
-    private val prefs = context.getSharedPreferences("appearance_and_keyboard", Context.MODE_PRIVATE)
-    fun read(): AppSettings = try {
-        val root = JSONObject(prefs.getString("settings", "{}")!!)
-        AppSettings(ThemeMode.valueOf(root.optString("theme", "SYSTEM")), root.optBoolean("dynamic", true),
-            root.optString("font", "maple"), root.optInt("size", 14).coerceIn(8, 32),
-            TerminalPalette.valueOf(root.optString("palette", "DARK")),
-            root.optJSONArray("keyboard")?.let(::decodeKeyboard) ?: KeyboardProfile.default(),
-            root.optJSONObject("keyboardSizing")?.let {
-                KeyboardSizing(it.optInt("height", 38).coerceIn(28, 56), it.optInt("visibleKeys", 7).coerceIn(4, 12))
-            } ?: KeyboardSizing(),
-            BackgroundMode.entries.firstOrNull { it.name == root.optString("backgroundMode") } ?: BackgroundMode.NORMAL)
-    } catch (_: Exception) { AppSettings() }
-    fun save(settings: AppSettings) {
-        settings.keyboard.validate()
-        settings.keyboardSizing.validate()
-        require(settings.fontSize in 8..32)
-        val root = JSONObject().put("version", 1).put("theme", settings.theme.name).put("dynamic", settings.dynamicColor)
-            .put("font", settings.fontId).put("size", settings.fontSize).put("palette", settings.palette.name)
-            .put("backgroundMode", settings.backgroundMode.name)
-            .put("keyboard", encodeKeyboard(settings.keyboard))
-            .put("keyboardSizing", JSONObject().put("height", settings.keyboardSizing.rowHeight).put("visibleKeys", settings.keyboardSizing.visibleKeys))
-        prefs.edit { putString("settings", root.toString()) }
-    }
+class SettingsStore(context: Context, name: String = "appearance_and_keyboard") {
+    private val prefs = context.getSharedPreferences(name, Context.MODE_PRIVATE)
+    fun read(): AppSettings = try { decode(prefs.getString("settings", "{}")!!, strict = false) } catch (_: Exception) { AppSettings() }
+    fun save(settings: AppSettings) { prefs.edit { putString("settings", encode(settings)) } }
+    @android.annotation.SuppressLint("UseKtx") // KTX edit returns Unit; restore must inspect the disk commit result.
+    fun saveRestored(settings: AppSettings): Boolean = prefs.edit().putString("settings", encode(settings)).commit()
     companion object {
+        fun decode(text: String, strict: Boolean = true): AppSettings {
+            if (strict) {
+                require(text.length <= 1024 * 1024)
+                var depth = 0; var quoted = false; var escaped = false
+                text.forEach { char ->
+                    if (quoted) {
+                        if (escaped) escaped = false
+                        else if (char == '\\') escaped = true
+                        else if (char == '"') quoted = false
+                    } else when (char) {
+                        '"' -> quoted = true
+                        '{', '[' -> { depth++; require(depth <= 16) }
+                        '}', ']' -> { depth--; require(depth >= 0) }
+                    }
+                }
+                require(!quoted && depth == 0)
+            }
+            val root = JSONObject(text)
+            if (strict) {
+                require(root.get("version") == 1 && root.get("size") is Int && root.get("dynamic") is Boolean)
+                listOf("theme", "font", "palette", "backgroundMode").forEach { require(root.get(it) is String) }
+                require(root.getJSONArray("keyboard").length() == 2)
+                val sizing = root.getJSONObject("keyboardSizing")
+                require(sizing.get("height") is Int && sizing.get("visibleKeys") is Int)
+            }
+            return AppSettings(ThemeMode.valueOf(root.optString("theme", "SYSTEM")), root.optBoolean("dynamic", true),
+                root.optString("font", "maple"), root.optInt("size", 14).let { if (strict) it else it.coerceIn(8, 32) },
+                TerminalPalette.valueOf(root.optString("palette", "DARK")),
+                root.optJSONArray("keyboard")?.let(::decodeKeyboard) ?: KeyboardProfile.default(),
+                root.optJSONObject("keyboardSizing")?.let { KeyboardSizing(it.optInt("height", 38).let { n -> if (strict) n else n.coerceIn(28, 56) },
+                    it.optInt("visibleKeys", 7).let { n -> if (strict) n else n.coerceIn(4, 12) }) } ?: KeyboardSizing(),
+                if (strict) BackgroundMode.valueOf(root.optString("backgroundMode", "NORMAL"))
+                else BackgroundMode.entries.firstOrNull { it.name == root.optString("backgroundMode") } ?: BackgroundMode.NORMAL)
+                .also { require(it.fontSize in 8..32 && it.fontId.length <= 128); it.keyboard.validate(); it.keyboardSizing.validate() }
+        }
+        fun encode(settings: AppSettings): String {
+            settings.keyboard.validate(); settings.keyboardSizing.validate(); require(settings.fontSize in 8..32)
+            return JSONObject().put("version", 1).put("theme", settings.theme.name).put("dynamic", settings.dynamicColor)
+                .put("font", settings.fontId).put("size", settings.fontSize).put("palette", settings.palette.name)
+                .put("backgroundMode", settings.backgroundMode.name).put("keyboard", encodeKeyboard(settings.keyboard))
+                .put("keyboardSizing", JSONObject().put("height", settings.keyboardSizing.rowHeight).put("visibleKeys", settings.keyboardSizing.visibleKeys)).toString()
+        }
+
         fun encodeKeyboard(profile: KeyboardProfile) = JSONArray().apply {
             profile.rows.forEach { row -> put(JSONArray().apply { row.forEach { slot ->
                 val item = JSONObject().put("label", slot.label).put("width", slot.width)
@@ -57,7 +82,7 @@ class SettingsStore(context: Context) {
             } }) }
         }
         fun decodeKeyboard(rows: JSONArray) = KeyboardProfile(List(rows.length()) { r ->
-            val row = rows.getJSONArray(r)
+            val row = rows.getJSONArray(r).also { require(it.length() in 1..32) }
             List(row.length()) { c ->
                 val slot = row.getJSONObject(c)
                 val value = slot.optString("value")

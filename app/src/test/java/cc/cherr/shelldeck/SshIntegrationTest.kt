@@ -41,6 +41,20 @@ class SshIntegrationTest {
                 }
                 val expected = File(root, "$publicName.pub").readText().trim().split(" ").take(2).joinToString(" ")
                 assertEquals(name, expected, public)
+                // Both exports preserve the key; only explicit empty-password exports may be plaintext.
+                for (exportPassword in listOf("export-test-password", "")) {
+                    val exported = SshKeys.exportPrivate(key.getPrivate(), exportPassword.toCharArray())
+                    try {
+                        assertTrue(exported.toString(Charsets.UTF_8).startsWith(if (exportPassword.isEmpty())
+                            "-----BEGIN PRIVATE KEY-----" else "-----BEGIN ENCRYPTED PRIVATE KEY-----"))
+                        assertEquals(public, SshKeys.publicKey(SshKeys.load(ssh, exported, exportPassword.toCharArray()).getPublic()))
+                        val openssl = ProcessBuilder("openssl", "pkey", "-pubout", "-passin", "pass:$exportPassword").start()
+                        openssl.outputStream.use { it.write(exported) }
+                        val publicPem = openssl.inputStream.bufferedReader().readText()
+                        assertEquals("OpenSSL must decode $name export", 0, openssl.waitFor())
+                        assertTrue(publicPem.startsWith("-----BEGIN PUBLIC KEY-----"))
+                    } finally { exported.fill(0) }
+                }
                 ssh.authPublickey(username, key)
                 ssh.startSession().use { session ->
                     val command = session.exec("printf 'SSH_OK'")

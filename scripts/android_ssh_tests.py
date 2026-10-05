@@ -10,6 +10,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--serial", required=True)
     args = parser.parse_args()
+    # Gradle also needs the selected serial when multiple emulators are connected.
+    os.environ["ANDROID_SERIAL"] = args.serial
     root = Path(os.environ["SSH_TEST_DIR"])
     port = os.environ["SSH_TEST_PORT"]
     adb = [str(Path(os.environ["ANDROID_HOME"]) / "platform-tools/adb"), "-s", args.serial]
