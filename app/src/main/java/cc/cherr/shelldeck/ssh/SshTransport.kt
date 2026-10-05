@@ -22,6 +22,7 @@ class SshTransport(
     private val verify: HostKeyVerifier,
     private val authenticate: (SSHClient) -> Unit,
     private val status: (ConnectionState) -> Unit,
+    private val startupCommand: String = "",
 ) : TerminalTransport {
     private val closed = AtomicBoolean()
     private val outputLock = Any()
@@ -67,6 +68,11 @@ class SshTransport(
                 try { channel.setEnvVar("COLORTERM", "truecolor") } catch (_: java.io.IOException) { }
                 val active = channel.startShell().also { shell = it }
                 check(!closed.get())
+                // Before publishing readiness: UI input cannot overtake this one-time command.
+                val startup = startupCommandLine(startupCommand)
+                try {
+                    if (startup.isNotEmpty()) active.outputStream.apply { write(startup); flush() }
+                } finally { startup.fill(0) }
                 status(ConnectionState.CONNECTED)
                 listener.onReady()
                 val bytes = ByteArray(16 * 1024)

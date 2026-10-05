@@ -30,6 +30,17 @@ class SshIntegrationTest {
                 var prompts = 0
                 val key = SshKeys.loadWithPassphraseRequest(ssh, File(root, name).readBytes()) { prompts++; password }
                 assertEquals(name, if (name.endsWith("encrypted")) 1 else 0, prompts)
+                val public = SshKeys.publicKey(key.getPublic())
+                // ssh-keygen cannot read every PKCS8 variant; fixture public keys are independently
+                // produced by OpenSSH/OpenSSL before conversion to the imported private-key format.
+                val publicName = when {
+                    name.startsWith("rsa-pem") || name.startsWith("rsa-pkcs8") -> "rsa"
+                    name.startsWith("ed25519-pkcs8") -> "ed25519-pkcs8"
+                    name.startsWith("ecdsa") -> "ecdsa-pem"
+                    else -> name
+                }
+                val expected = File(root, "$publicName.pub").readText().trim().split(" ").take(2).joinToString(" ")
+                assertEquals(name, expected, public)
                 ssh.authPublickey(username, key)
                 ssh.startSession().use { session ->
                     val command = session.exec("printf 'SSH_OK'")
@@ -68,7 +79,7 @@ class SshIntegrationTest {
         val received = StringBuffer()
         val transport = SshTransport("127.0.0.1", port, username, verifier(), { ssh ->
             ssh.authPublickey(username, SshKeys.load(ssh, File(root, "ed25519").readBytes(), charArrayOf()))
-        }, {})
+        }, {}, startupCommand = "stty -echo; export SHELLDECK_START_COUNT=\$(( \${SHELLDECK_START_COUNT:-0} + 1 ))")
         transport.start(TerminalSize(80, 24, 8, 16), object : TerminalTransport.Listener {
             override fun onReady() { ready.countDown() }
             override fun onBytes(bytes: ByteArray, length: Int) { received.append(String(bytes, 0, length, Charsets.UTF_8)) }
@@ -89,6 +100,7 @@ class SshIntegrationTest {
             transport.resize(TerminalSize(100, 35, 8, 16), Runnable { resized.countDown() })
             assertTrue(resized.await(5, TimeUnit.SECONDS))
             send("stty size\r"); waitFor("35 100")
+            send("printf 'START_COUNT:%s\\n' \$SHELLDECK_START_COUNT\r"); waitFor("START_COUNT:1")
             send("export LANG=C.UTF-8 LC_ALL=C.UTF-8\r")
             send("printf 'DELETE_OK:%s\\n' 中\u007fA\r"); waitFor("DELETE_OK:A")
         } finally { transport.close() }

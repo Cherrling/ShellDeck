@@ -70,6 +70,33 @@ object SshKeys {
             "-----BEGIN $label-----\n" + Base64.getMimeEncoder(64, byteArrayOf(10)).encodeToString(encoded) + "\n-----END $label-----\n"
         } finally { encoded.fill(0) }
     }
+    enum class GenerationType(val label: String, val jcaName: String) {
+        ED25519("Ed25519", "Ed25519"), RSA3072("RSA 3072", "RSA")
+    }
+
+    /** The caller must wipe the returned private bytes after encrypting them into the vault. */
+    fun generate(type: GenerationType, passphrase: CharArray): ByteArray {
+        configure()
+        val random = java.security.SecureRandom()
+        val generator = java.security.KeyPairGenerator.getInstance(type.jcaName, "BC")
+        if (type == GenerationType.RSA3072) generator.initialize(3072, random)
+        val pair = generator.generateKeyPair()
+        val encryptor = if (passphrase.isEmpty()) null else
+            org.bouncycastle.openssl.jcajce.JceOpenSSLPKCS8EncryptorBuilder(org.bouncycastle.openssl.PKCS8Generator.AES_256_CBC)
+                .setProvider("BC").setRandom(random).setPassword(passphrase)
+                .setPRF(org.bouncycastle.openssl.PKCS8Generator.PRF_HMACSHA256)
+                .setIterationCount(210_000).build()
+        val pem = org.bouncycastle.openssl.jcajce.JcaPKCS8Generator(pair.private, encryptor).generate()
+        return try {
+            ("-----BEGIN ${pem.type}-----\n" + Base64.getMimeEncoder(64, byteArrayOf(10)).encodeToString(pem.content) +
+                "\n-----END ${pem.type}-----\n").toByteArray(Charsets.UTF_8)
+        } finally { pem.content.fill(0) }
+    }
+
+    /** One authorized_keys-compatible OpenSSH public key, without a user-controlled comment. */
+    fun publicKey(key: PublicKey): String = algorithm(key) + " " +
+        Base64.getEncoder().encodeToString(Buffer.PlainBuffer().putPublicKey(key).compactData)
+
     fun fingerprint(key: PublicKey): String {
         val wire = Buffer.PlainBuffer().putPublicKey(key).compactData
         return "SHA256:" + Base64.getEncoder().withoutPadding().encodeToString(MessageDigest.getInstance("SHA-256").digest(wire))

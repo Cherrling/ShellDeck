@@ -102,17 +102,21 @@ class ShellDeckModel(application: Application) : AndroidViewModel(application) {
             finally { post { busy = false } }
         }
     }
-    fun saveHost(id: String?, label: String, hostname: String, port: String, username: String, identityId: String?): Boolean {
+    fun saveHost(id: String?, label: String, hostname: String, port: String, username: String, identityId: String?, startupCommand: String = ""): Boolean {
         val number = port.toIntOrNull()
         val host = hostname.trim().removeSurrounding("[", "]").lowercase(Locale.ROOT)
         if (host.isBlank() || host.any { it.isWhitespace() || it == '/' } || number == null || number !in 1..65535 || username.isBlank()) {
             error = "请填写有效的服务器地址、端口（1–65535）和用户名"; return false
+        }
+        if (runCatching { startupCommandLine(startupCommand) }.isFailure) {
+            error = "启动命令必须是单行、不含控制字符，且不超过 4095 字节"; return false
         }
         operation("服务器保存失败") {
             val record = if (id == null) HostRecord() else requireNotNull(dao.host(id))
             dao.saveHost(record.apply {
                 this.id = id ?: UUID.randomUUID().toString(); this.label = label.trim().ifBlank { host }
                 this.hostname = host; this.port = number; this.username = username.trim(); this.identityId = identityId
+                this.startupCommand = startupCommand
             })
         }
         return true
@@ -122,7 +126,7 @@ class ShellDeckModel(application: Application) : AndroidViewModel(application) {
         val original = requireNotNull(dao.host(id))
         dao.saveHost(HostRecord().apply {
             this.id = UUID.randomUUID().toString(); label = "${original.label}（副本）"
-            hostname = original.hostname; port = original.port; username = original.username; identityId = original.identityId
+            hostname = original.hostname; port = original.port; username = original.username; identityId = original.identityId; startupCommand = original.startupCommand
         })
     }
     private fun markUsed(host: HostRecord) {
@@ -140,6 +144,7 @@ class ShellDeckModel(application: Application) : AndroidViewModel(application) {
         operation("删除身份失败，请检查是否仍有服务器引用") { dao.deleteIdentity(id) }
     }
     fun importIdentity(label: String, pasted: String, uri: Uri?, passphrase: String, imported: () -> Unit) {
+        if (busy || cleared) return
         val password = passphrase.toCharArray()
         operation("私钥导入失败，请检查文件是否为完整的 OpenSSH / PEM 私钥，以及口令是否正确") {
             var bytes: ByteArray? = null
@@ -161,6 +166,7 @@ class ShellDeckModel(application: Application) : AndroidViewModel(application) {
                     dao.insertIdentity(IdentityRecord().apply {
                         this.id = id; this.label = label.trim().ifBlank { "SSH Key" }
                         algorithm = SshKeys.algorithm(keys.getPublic()); fingerprint = SshKeys.fingerprint(keys.getPublic())
+                        publicKey = SshKeys.publicKey(keys.getPublic())
                         encryptedKey = vault.encrypt(id, bytes)
                     })
                 }
@@ -168,6 +174,69 @@ class ShellDeckModel(application: Application) : AndroidViewModel(application) {
             } finally { bytes?.fill(0); password.fill('\u0000') }
         }
     }
+    data class PublicKeyDetails(val id: String, val label: String, val algorithm: String, val fingerprint: String, val key: String)
+    var publicKeyDetails by mutableStateOf<PublicKeyDetails?>(null); private set
+    var publicKeyUnlock by mutableStateOf<String?>(null); private set
+    fun dismissPublicKey() { if (!busy) { publicKeyDetails = null; publicKeyUnlock = null } }
+
+    fun generateIdentity(label: String, type: SshKeys.GenerationType, passphrase: String, generated: () -> Unit) {
+        if (busy || cleared) return
+        val password = passphrase.toCharArray()
+        operation("密钥生成失败，请重试") {
+            var bytes: ByteArray? = null
+            try {
+                bytes = SshKeys.generate(type, password)
+                SSHClient().use { client ->
+                    val key = SshKeys.load(client, bytes, password).getPublic()
+                    val identity = IdentityRecord().apply {
+                        id = UUID.randomUUID().toString(); this.label = label.trim().ifBlank { type.label }
+                        algorithm = SshKeys.algorithm(key); fingerprint = SshKeys.fingerprint(key)
+                        publicKey = SshKeys.publicKey(key); encryptedKey = vault.encrypt(id, bytes)
+                    }
+                    dao.insertIdentity(identity)
+                    post { generated(); publicKeyDetails = details(identity) }
+                }
+            } finally { bytes?.fill(0); password.fill('\u0000') }
+        }
+    }
+    private fun details(identity: IdentityRecord) = PublicKeyDetails(identity.id, identity.label,
+        identity.algorithm, identity.fingerprint, requireNotNull(identity.publicKey))
+
+    fun showPublicKey(id: String, passphrase: String? = null) {
+        if (busy || cleared) return
+        val password = passphrase?.toCharArray()
+        operation("公钥读取失败，请检查私钥口令；若设备密钥已失效，需要重新导入私钥") {
+            try {
+                val identity = requireNotNull(dao.identity(id))
+                if (identity.publicKey == null) {
+                    val bytes = vault.decrypt(id, identity.encryptedKey)
+                    var needsPassword = false
+                    try {
+                        SshKeys.configure()
+                        SSHClient().use { client ->
+                            val key = SshKeys.loadWithPassphraseRequest(client, bytes) {
+                                needsPassword = password == null
+                                password?.copyOf()
+                            }.getPublic()
+                            identity.publicKey = SshKeys.publicKey(key)
+                            dao.savePublicKey(id, requireNotNull(identity.publicKey))
+                        }
+                    } catch (failure: Exception) {
+                        if (needsPassword) { post { publicKeyUnlock = id }; return@operation }
+                        throw failure
+                    } finally { bytes.fill(0) }
+                }
+                post { publicKeyUnlock = null; publicKeyDetails = details(identity) }
+            } finally { password?.fill('\u0000') }
+        }
+    }
+    fun exportPublicKey(id: String, uri: Uri) = operation("公钥保存失败，请重新选择保存位置") {
+        val key = requireNotNull(dao.identity(id)?.publicKey)
+        getApplication<Application>().contentResolver.openOutputStream(uri, "wt")!!.use {
+            it.write((key + "\n").toByteArray(Charsets.UTF_8))
+        }
+    }
+
     fun connect(host: HostRecord, secret: String) {
         val before = sessionManager.sessions.size
         val connection = sessionManager.connect(host, secret)

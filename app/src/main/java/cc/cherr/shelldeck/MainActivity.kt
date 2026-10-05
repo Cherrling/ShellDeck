@@ -40,6 +40,8 @@ import cc.cherr.shelldeck.data.IdentityRecord
 import cc.cherr.shelldeck.ssh.TrustDecision
 import cc.cherr.shelldeck.ui.ShellDeckTheme
 import cc.cherr.shelldeck.settings.SettingsScreen
+import cc.cherr.shelldeck.settings.GenerateIdentityDialog
+import cc.cherr.shelldeck.settings.PublicKeyDialogs
 import cc.cherr.shelldeck.keyboard.ExtraKeysBar
 import androidx.compose.runtime.saveable.rememberSaveable
 
@@ -104,6 +106,8 @@ private fun ShellDeckApp(model: ShellDeckModel, activity: MainActivity) {
     var hostEditor by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<HostRecord?>(null) }
     var importing by remember { mutableStateOf(false) }
+    var addingIdentity by remember { mutableStateOf(false) }
+    var generating by remember { mutableStateOf(false) }
     var login by remember { mutableStateOf<HostRecord?>(null) }
     var closing by remember { mutableStateOf<String?>(null) }
     var page by rememberSaveable { mutableStateOf(MainPage.HOSTS) }
@@ -141,9 +145,9 @@ private fun ShellDeckApp(model: ShellDeckModel, activity: MainActivity) {
     Scaffold(containerColor = background, contentColor = foreground, floatingActionButton = {
         if (terminal == null && !editingKeyboard && !model.busy && (page == MainPage.HOSTS || showIdentities)) {
             FloatingActionButton(onClick = {
-                if (showIdentities) importing = true else { editing = null; hostEditor = true }
+                if (showIdentities) addingIdentity = true else { editing = null; hostEditor = true }
             }) {
-                Icon(painterResource(R.drawable.ic_add), contentDescription = if (showIdentities) "导入 SSH Key" else "添加服务器")
+                Icon(painterResource(R.drawable.ic_add), contentDescription = if (showIdentities) "添加 SSH Key" else "添加服务器")
             }
         }
     }, bottomBar = {
@@ -249,13 +253,14 @@ private fun ShellDeckApp(model: ShellDeckModel, activity: MainActivity) {
                     }
                     }
                     if (showIdentities) {
-                    if (model.identities.isEmpty()) item { Text("导入可供多个服务器共用的 SSH 私钥。私钥加密保存，口令仅用于本次操作。") }
+                    if (model.identities.isEmpty()) item { Text("生成或导入可供多个服务器共用的 SSH 密钥。私钥加密保存，公钥可以复制和导出。") }
                     items(model.identities, key = { it.id }) { identity ->
                         OutlinedCard(Modifier.fillMaxWidth()) {
                             Column(Modifier.padding(12.dp)) {
                                 Text(identity.label, style = MaterialTheme.typography.titleMedium)
                                 Text(identity.algorithm, style = MaterialTheme.typography.bodySmall)
                                 Text(identity.fingerprint, style = MaterialTheme.typography.labelSmall)
+                                TextButton(enabled = !model.busy, onClick = { model.showPublicKey(identity.id) }) { Text("查看公钥") }
                                 TextButton(enabled = !model.busy, onClick = { deletingIdentity = identity }) { Text("删除身份") }
                             }
                         }
@@ -265,9 +270,16 @@ private fun ShellDeckApp(model: ShellDeckModel, activity: MainActivity) {
             }
         }
     }
-    if (hostEditor) HostEditor(editing, model.identities, onDismiss = { hostEditor = false }) { label, hostname, port, username, identity ->
-        if (model.saveHost(editing?.id, label, hostname, port, username, identity)) hostEditor = false
+    if (hostEditor) HostEditor(editing, model.identities, onDismiss = { hostEditor = false }) { label, hostname, port, username, identity, startup ->
+        if (model.saveHost(editing?.id, label, hostname, port, username, identity, startup)) hostEditor = false
     }
+    if (addingIdentity) AlertDialog(onDismissRequest = { addingIdentity = false }, title = { Text("添加 SSH Key") },
+        text = { Column {
+            TextButton(onClick = { addingIdentity = false; generating = true }) { Text("生成新密钥") }
+            TextButton(onClick = { addingIdentity = false; importing = true }) { Text("导入私钥") }
+        } }, confirmButton = { TextButton(onClick = { addingIdentity = false }) { Text("取消") } })
+    if (generating) GenerateIdentityDialog(model) { generating = false }
+    PublicKeyDialogs(model)
     if (importing) ImportDialog(model, onDismiss = { importing = false })
     login?.let { host ->
         var secret by remember(host.id) { mutableStateOf("") }
@@ -312,7 +324,7 @@ private fun ShellDeckApp(model: ShellDeckModel, activity: MainActivity) {
         manager.close(id); closing = null
     } }
     deletingHost?.let { host -> ConfirmDialog("删除服务器？", host.label, { deletingHost = null }) { model.deleteHost(host.id); deletingHost = null } }
-    deletingIdentity?.let { identity -> ConfirmDialog("删除身份？", "${identity.label}：删除后需要重新导入私钥。", { deletingIdentity = null }) { model.deleteIdentity(identity.id); deletingIdentity = null } }
+    deletingIdentity?.let { identity -> ConfirmDialog("删除身份？", "${identity.label}：删除后无法再使用此身份连接。", { deletingIdentity = null }) { model.deleteIdentity(identity.id); deletingIdentity = null } }
     model.error?.let { message -> AlertDialog(onDismissRequest = model::clearError, title = { Text("操作未完成") }, text = { Text(message) }, confirmButton = { TextButton(onClick = model::clearError) { Text("确定") } }) }
 }
 
@@ -324,11 +336,12 @@ private fun ConfirmDialog(title: String, message: String, dismiss: () -> Unit, c
 
 @Composable
 private fun HostEditor(host: HostRecord?, identities: List<IdentityRecord>, onDismiss: () -> Unit,
-    save: (String, String, String, String, String?) -> Unit) {
+    save: (String, String, String, String, String?, String) -> Unit) {
     var label by remember { mutableStateOf(host?.label ?: "") }
     var hostname by remember { mutableStateOf(host?.hostname ?: "") }
     var port by remember { mutableStateOf(host?.port?.toString() ?: "22") }
     var username by remember { mutableStateOf(host?.username ?: "root") }
+    var startup by remember { mutableStateOf(host?.startupCommand ?: "") }
     var identity by remember { mutableStateOf(if (host != null) host.identityId else identities.firstOrNull()?.id) }
     AlertDialog(onDismissRequest = onDismiss, title = { Text(if (host == null) "添加服务器" else "编辑服务器") },
         text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -336,12 +349,14 @@ private fun HostEditor(host: HostRecord?, identities: List<IdentityRecord>, onDi
             OutlinedTextField(hostname, { hostname = it }, label = { Text("主机名 / IP") }, singleLine = true)
             OutlinedTextField(port, { port = it }, label = { Text("端口") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
             OutlinedTextField(username, { username = it }, label = { Text("用户名") }, singleLine = true)
+            OutlinedTextField(startup, { startup = it }, label = { Text("启动命令（可留空）") }, singleLine = true,
+                supportingText = { Text("每次新建连接时执行一次，例如 tmux new-session -A -s codex") })
             Text("认证身份")
             identities.forEach { option ->
                 Row { RadioButton(selected = identity == option.id, onClick = { identity = option.id }); TextButton(onClick = { identity = option.id }) { Text(option.label) } }
             }
             Row { RadioButton(selected = identity == null, onClick = { identity = null }); TextButton(onClick = { identity = null }) { Text("密码登录") } }
-        } }, confirmButton = { TextButton(onClick = { save(label, hostname, port, username, identity) }) { Text("保存") } },
+        } }, confirmButton = { TextButton(onClick = { save(label, hostname, port, username, identity, startup) }) { Text("保存") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } })
 }
 

@@ -17,9 +17,9 @@ class HostBrowserDeviceTest {
         fun waitSaved() = ui.waitUntil(5000) { !model.busy }
         try {
             waitSaved()
-            ui.runOnUiThread { model.saveHost(null, "$prefix A", "127.0.0.1", "1", "deploy", null) }; waitSaved()
+            ui.runOnUiThread { model.saveHost(null, "$prefix A", "127.0.0.1", "1", "deploy", null, "tmux new-session -A -s codex") }; waitSaved()
             val first = model.hosts.first { it.label == "$prefix A" }
-            ui.runOnUiThread { model.saveHost(null, "$prefix B", "127.0.0.1", "2", "deploy", null) }; waitSaved()
+            ui.runOnUiThread { model.saveHost(null, "$prefix B", "127.0.0.1", "2", "deploy", null, "tmux new-session -A -s codex") }; waitSaved()
             ui.onNodeWithTag("host-search").performTextInput("fixture A")
             ui.onNodeWithTag("host-${first.id}").assertIsDisplayed()
             ui.onNodeWithText("$prefix B", substring = false).assertDoesNotExist()
@@ -37,7 +37,7 @@ class HostBrowserDeviceTest {
             }
             ui.waitUntil(5000) { model.hosts.first { it.id == first.id }.lastUsedAt > 0 }
             val used = model.hosts.first { it.id == first.id }.lastUsedAt
-            ui.runOnUiThread { model.saveHost(first.id, "$prefix Renamed", "127.0.0.1", "1", "deploy", null) }; waitSaved()
+            ui.runOnUiThread { model.saveHost(first.id, "$prefix Renamed", "127.0.0.1", "1", "deploy", null, "tmux new-session -A -s codex") }; waitSaved()
             ui.runOnIdle {
                 val changed = model.hosts.first { it.id == first.id }
                 assertTrue(changed.favorite); assertEquals(used, changed.lastUsedAt)
@@ -51,6 +51,7 @@ class HostBrowserDeviceTest {
             ui.runOnIdle {
                 val copy = model.hosts.single { it.label == "$prefix Renamed（副本）" }
                 assertNotEquals(first.id, copy.id); assertEquals(first.hostname, copy.hostname)
+                assertEquals("tmux new-session -A -s codex", copy.startupCommand)
                 assertFalse(copy.favorite); assertEquals(0L, copy.lastUsedAt)
             }
         } finally {

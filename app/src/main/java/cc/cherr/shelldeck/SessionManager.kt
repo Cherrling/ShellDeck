@@ -98,7 +98,7 @@ class SessionConnection(application: Application, val host: HostRecord, dao: Sto
                         } finally { bytes.fill(0) }
                     }
                 } finally { password.fill('\u0000') }
-            }, status = { value -> main.post { if (!disposed && !ended && !state.terminal) state = value } })
+            }, startupCommand = host.startupCommand, status = { value -> main.post { if (!disposed && !ended && !state.terminal) state = value } })
         terminal.session = TerminalSession(transport, 5000, terminal)
         // Start independently of composition; a quick navigation must not leave an unstarted connection.
         terminal.session.updateSize(80, 24, 8, 16)

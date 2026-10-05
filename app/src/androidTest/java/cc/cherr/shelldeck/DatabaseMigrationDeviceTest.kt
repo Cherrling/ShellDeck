@@ -9,12 +9,14 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class DatabaseMigrationDeviceTest {
-    @Test fun versionOneKeepsCredentialsHostReferencesAndKnownHostPins() {
+    @Test fun versionOneKeepsCredentialsHostReferencesAndKnownHostPins() = verifyMigration(1)
+    @Test fun versionTwoKeepsCredentialsAndHostHistory() = verifyMigration(2)
+    private fun verifyMigration(version: Int) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
         val name = "migration-test.db"
         context.deleteDatabase(name)
-        val schema = JSONObject(instrumentation.context.assets.open("cc.cherr.shelldeck.data.ShellDeckDatabase/1.json").bufferedReader().use { it.readText() }).getJSONObject("database")
+        val schema = JSONObject(instrumentation.context.assets.open("cc.cherr.shelldeck.data.ShellDeckDatabase/$version.json").bufferedReader().use { it.readText() }).getJSONObject("database")
         val vault = CredentialVault()
         val fixture = "migration fixture, not a private key".toByteArray()
         val encrypted = vault.encrypt("identity", fixture)
@@ -29,27 +31,29 @@ class DatabaseMigrationDeviceTest {
                 }
                 val setup = schema.getJSONArray("setupQueries")
                 for (i in 0 until setup.length()) old.execSQL(setup.getString(i))
-                old.execSQL("INSERT INTO identities VALUES (?, ?, ?, ?, ?)", arrayOf("identity", "My key", "SHA256:fixture", "ED25519", encrypted))
-                old.execSQL("INSERT INTO hosts VALUES (?, ?, ?, ?, ?, ?)", arrayOf("host", "My host", "example.com", 22, "dev", "identity"))
-                old.execSQL("INSERT INTO known_hosts VALUES (?, ?, ?, ?)", arrayOf("example.com", 22, "ED25519", "SHA256:server"))
-                old.version = 1
+                old.execSQL("INSERT INTO identities VALUES (?, ?, ?, ?, ?)", arrayOf<Any>("identity", "My key", "SHA256:fixture", "ED25519", encrypted))
+                old.execSQL("INSERT INTO hosts (id, label, hostname, port, username, identityId) VALUES (?, ?, ?, ?, ?, ?)", arrayOf<Any>("host", "My host", "example.com", 22, "dev", "identity"))
+                old.execSQL("INSERT INTO known_hosts VALUES (?, ?, ?, ?)", arrayOf<Any>("example.com", 22, "ED25519", "SHA256:server"))
+                if (version == 2) old.execSQL("UPDATE hosts SET favorite = 1, lastUsedAt = 42")
+                old.version = version
             }
-            val db = Room.databaseBuilder(context, ShellDeckDatabase::class.java, name).addMigrations(ShellDeckDatabase.MIGRATION_1_2).build()
+            val db = Room.databaseBuilder(context, ShellDeckDatabase::class.java, name).addMigrations(ShellDeckDatabase.MIGRATION_1_2, ShellDeckDatabase.MIGRATION_2_3).build()
             try {
                 val dao = db.records()
                 val host = dao.host("host")!!
                 assertEquals("identity", host.identityId); assertEquals("My host", host.label)
-                assertFalse(host.favorite); assertEquals(0L, host.lastUsedAt)
+                assertEquals(version == 2, host.favorite); assertEquals(if (version == 2) 42L else 0L, host.lastUsedAt)
+                assertEquals("", host.startupCommand); assertNull(dao.identity("identity")!!.publicKey)
                 assertArrayEquals(encrypted, dao.identity("identity")!!.encryptedKey)
                 assertArrayEquals(fixture, vault.decrypt("identity", dao.identity("identity")!!.encryptedKey))
                 assertEquals("SHA256:server", dao.knownHost("example.com", 22)!!.fingerprint)
                 dao.toggleFavorite(host.id); dao.markUsed(host.id, 123)
-                assertTrue(dao.host(host.id)!!.favorite); assertEquals(123L, dao.host(host.id)!!.lastUsedAt)
+                assertEquals(version != 2, dao.host(host.id)!!.favorite); assertEquals(123L, dao.host(host.id)!!.lastUsedAt)
             } finally { db.close() }
-            // Reopen without replaying the migration; the generated v2 schema must remain valid.
-            val reopened = Room.databaseBuilder(context, ShellDeckDatabase::class.java, name).addMigrations(ShellDeckDatabase.MIGRATION_1_2).build()
+            // Reopen without replaying the migration; the generated v3 schema must remain valid.
+            val reopened = Room.databaseBuilder(context, ShellDeckDatabase::class.java, name).addMigrations(ShellDeckDatabase.MIGRATION_1_2, ShellDeckDatabase.MIGRATION_2_3).build()
             try {
-                assertTrue(reopened.records().host("host")!!.favorite)
+                assertEquals(version != 2, reopened.records().host("host")!!.favorite)
                 assertEquals(123L, reopened.records().host("host")!!.lastUsedAt)
             } finally { reopened.close() }
         } finally { context.deleteDatabase(name); fixture.fill(0) }

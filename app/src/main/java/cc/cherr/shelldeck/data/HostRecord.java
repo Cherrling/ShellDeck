@@ -12,6 +12,7 @@ public class HostRecord {
     public int port = 22;
     @NonNull public String username = "";
     @Nullable public String identityId;
+    @NonNull @ColumnInfo(defaultValue = "''") public String startupCommand = "";
     @ColumnInfo(defaultValue = "0") public boolean favorite = false;
     @ColumnInfo(defaultValue = "0") public long lastUsedAt = 0;
 }

@@ -1,4 +1,6 @@
-# SSH 与密钥登录：alpha.3 设计记录
+# SSH 与密钥登录：设计记录
+
+以下原始设计记录保留 alpha.3 背景；当前密钥生成、公钥导出及启动命令见文末更新。
 
 ## 来源与版本
 
@@ -28,3 +30,16 @@ ViewModel 持有会话；TerminalView 在 AndroidView.factory 创建，适配器
 单个活动 SSH session；基础 Host CRUD、身份导入/删除、固定快捷键，暂不提供密钥生成/导出、公钥安装、Mosh、SFTP、完整 Extra Keys 编辑器。关闭进程后不会恢复网络会话。指纹信任不是凭“连接成功”自动获得的。
 
 Bouncy Castle bcpkix 中带有未使用的 EST trust-all helper（JcaJceUtils）。lint 例外仅匹配 1.86 的该依赖 JAR；应用本身与其他依赖的 TrustAllX509TrustManager 检查仍开启。版本更新需重新审查此例外。SSH 不使用该 TLS helper。
+
+
+## Rolling code 10：生成密钥、公钥导出与启动命令
+
+- 本机生成默认 Ed25519，兼容选项为 RSA 3072。使用已固定的 BC 1.86 JCA provider 和 SecureRandom；生成与解析均在后台工作线程执行。
+- 生成的私钥先编码为 PKCS#8；有口令时采用 BC `JceOpenSSLPKCS8EncryptorBuilder` 的 AES-256-CBC、PBKDF2-HMAC-SHA256、210,000 次迭代及随机盐/IV。无论有无口令，持久化前都再经既有 Android Keystore AES-GCM vault 加密，外层 GCM 提供完整性保护。口令不持久化，自有私钥字节和口令数组在 finally 中清零。没有私钥文件导出或生成密钥备份功能；卸载或设备 Keystore 丢失后，生成的私钥无法恢复。
+- 公钥从 SSHJ 实际解析的 KeyProvider 提取，使用 SSH wire encoding 后 Base64 编码为 `algorithm base64`，与 authorized_keys 兼容；指纹对同一 wire bytes 计算 SHA256。公钥不含私钥材料，不附加未经处理的名称/comment。
+- 新生成/导入时写入独立 publicKey 字段；旧库该字段为 NULL，首次查看时解密原私钥并补提取。只有 parser 要求口令才提示；失败不写缓存。后续查看仅读取公钥，不再解密私钥。所有导入格式共用该提取路径。
+- 导出仅写公钥加换行，使用 Android `CreateDocument` / Storage Access Framework 选择位置，不申请存储权限。使用 `application/octet-stream` 保留 `.pub` 扩展名；实测 `text/plain` 会由系统追加 `.txt`，行为可见 [AOSP FileUtils.splitFileName](https://github.com/aosp-mirror/platform_frameworks_base/blob/android-15.0.0_r1/core/java/android/os/FileUtils.java)。待导出的 Identity ID 保存在非敏感 SavedState，避免文件选择器返回时选错身份；私钥和口令不进入 SavedState。
+- Room schema 3 增加 `hosts.startupCommand TEXT NOT NULL DEFAULT ''` 和 `identities.publicKey TEXT`，保留 1→2→3 与 2→3 迁移链及历史 schema；不破坏性重建或重加密旧凭据。
+- 启动命令为可选单行 Shell 输入，最多 4095 UTF-8 字节，拒绝控制字符。SSH shell 建立后、发布 onReady 前发送命令与回车，因此先于用户输入；UI 重建和 PTY resize 不触发它。它不是 SSH exec channel，也不自动安装公钥。自定义登录脚本若读取或丢弃初始输入，仍可能影响远端执行；不使用猜测提示符或定时重发来规避。
+
+参考：[BC PKCS#8 encryptor API](https://downloads.bouncycastle.org/java/docs/bcpkix-jdk18on-javadoc/org/bouncycastle/openssl/jcajce/JceOpenSSLPKCS8EncryptorBuilder.html)、[Android 创建文档](https://developer.android.com/training/data-storage/shared/documents-files)。API 签名同时核对了项目固定 1.86 JAR。

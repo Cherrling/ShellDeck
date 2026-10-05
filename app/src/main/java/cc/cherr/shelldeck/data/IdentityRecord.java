@@ -10,5 +10,6 @@ public class IdentityRecord {
     @NonNull public String label = "";
     @NonNull public String fingerprint = "";
     @NonNull public String algorithm = "";
+    @Nullable public String publicKey;
     @NonNull public byte[] encryptedKey = new byte[0];
 }

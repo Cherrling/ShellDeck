@@ -12,7 +12,9 @@
 - 内置 Maple Mono NF CN Regular，支持系统字体和导入 TTF / OTF、重命名、删除、字号及预览。终端内可用音量 ＋ / − 调整字号。
 - 正常连接时隐藏独立标题栏，快捷键占满整行，右下角不再放管理按钮。系统栏图标跟随实际页面/终端背景，深色终端使用浅色图标。
 - App 支持跟随系统/明亮/深色与动态配色；终端默认前景/背景独立设置。
-- 继续支持加密 Identity、OpenSSH / PEM / PKCS#8 导入、按需口令和服务器指纹验证。会话由应用级管理器与可选前台服务管理，支持关闭后台保持、静默通知和尽量常驻通知；划除不补发，最后一个连接结束即停止服务。仍不提供网络自动重连或进程死亡恢复，厂商后台限制与长期熄屏仍需真机验证。
+- SSH 身份支持本机生成 Ed25519（默认）或 RSA 3072，可选私钥口令；也支持 OpenSSH / PEM / PKCS#8 导入。每把密钥均可查看、复制公钥或通过系统文件选择器导出 OpenSSH `.pub`。旧身份首次提取公钥时仅在需要解密的情况下询问口令，之后查看公钥无需再次解锁。私钥始终经 Keystore 加密保存。
+- 主机可配置单行启动命令，例如 `tmux new-session -A -s codex`。默认留空，仅在每次新建 SSH Shell 后发送一次；切换页面、旋转、键盘和窗口尺寸变化不会重复执行。复制主机时保留命令。
+- 继续支持按需口令和服务器指纹验证。会话由应用级管理器与可选前台服务管理，支持关闭后台保持、静默通知和尽量常驻通知；划除不补发，最后一个连接结束即停止服务。仍不提供网络自动重连或进程死亡恢复，厂商后台限制与长期熄屏仍需真机验证。
 
 
 默认快捷键布局（已有布局不会被覆盖，可在编辑器中恢复默认并保存）：
@@ -22,7 +24,7 @@ ESC   /     -    PGUP   ↑   PGDN  SHIFT
 TAB  CTRL  ALT    ←     ↓    →    键盘
 ```
 
-数据库从版本 1 升到 2 时仅新增收藏和最近使用字段，保留身份密文、主机引用和服务器指纹。按照 [Room 迁移说明](https://developer.android.com/training/data-storage/room/migrating-db-versions) 保留历史 schema 并验证旧库迁移，不使用破坏性重建。
+数据库版本 3 新增主机启动命令和可空公钥缓存；支持版本 1 / 2 非破坏性升级，保留身份密文、主机引用、收藏、最近使用和服务器指纹。按照 [Room 迁移说明](https://developer.android.com/training/data-storage/room/migrating-db-versions) 保留历史 schema 并验证旧库迁移，不使用破坏性重建。
 
 ## 开发环境
 
@@ -55,6 +57,7 @@ APK 在 `app/build/outputs/apk/debug/app-debug.apk`。测试命令需要本机 O
 - push `v*` tag：检查版本与来源，测试、lint、签名构建、验签，发布 GitHub Release。
 - GitHub 仓库：[Cherrling/ShellDeck](https://github.com/Cherrling/ShellDeck)。后续正式发布使用已配置的固定签名 Secrets。详见 [发布说明](docs/development/releases.md)。
 - [后台会话与通知](docs/development/background-connections.md)。
+- [Rolling code 10 本地验证](docs/development/rolling-code10-validation.md)。
 - [Rolling code 6 本地验证](docs/development/rolling-code6-validation.md)。
 - 初始多会话实现和验证见 [会话与设置记录](docs/development/sessions-settings-alpha5.md)。
 - SSH 版验证见 [alpha.3 验证记录](docs/development/ssh-alpha3-validation.md)。

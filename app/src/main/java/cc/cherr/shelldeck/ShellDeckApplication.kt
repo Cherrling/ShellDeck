@@ -20,7 +20,7 @@ class ShellDeckApplication : Application() {
 
 /** Main-thread owner shared by UI and service. Database lives as long as this process. */
 class ConnectionRuntime(private val application: Application) {
-    private val database = Room.databaseBuilder(application, ShellDeckDatabase::class.java, "shelldeck.db").addMigrations(ShellDeckDatabase.MIGRATION_1_2).build()
+    private val database = Room.databaseBuilder(application, ShellDeckDatabase::class.java, "shelldeck.db").addMigrations(ShellDeckDatabase.MIGRATION_1_2, ShellDeckDatabase.MIGRATION_2_3).build()
     val dao = database.records()
     val vault = CredentialVault()
     private val main = Handler(Looper.getMainLooper())

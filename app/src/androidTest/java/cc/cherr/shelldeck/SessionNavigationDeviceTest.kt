@@ -28,7 +28,7 @@ class SessionNavigationDeviceTest {
             ui.runOnUiThread { model.importIdentity("Navigation test identity", pem, null, "") {} }
             ui.waitUntil(10000) { !model.busy && model.identities.any { it.label == "Navigation test identity" } }
             identityId = model.identities.first { it.label == "Navigation test identity" }.id
-            ui.runOnUiThread { model.saveHost(null, "Navigation test host", "127.0.0.1", args.getString("sshPort")!!, args.getString("sshUser")!!, identityId) }
+            ui.runOnUiThread { model.saveHost(null, "Navigation test host", "127.0.0.1", args.getString("sshPort")!!, args.getString("sshUser")!!, identityId, "export SHELLDECK_START_COUNT=\$(( \${SHELLDECK_START_COUNT:-0} + 1 ))") }
             ui.waitUntil(10000) { !model.busy && model.hosts.any { it.label == "Navigation test host" } }
             val host = model.hosts.first { it.label == "Navigation test host" }; hostId = host.id
             ui.onNodeWithContentDescription("Navigation test host 的更多操作").performClick()
@@ -71,6 +71,10 @@ class SessionNavigationDeviceTest {
             ui.waitUntil(5000) { model.sessionManager.selected == null }
             ui.onNodeWithText("活动会话").assertIsDisplayed()
             ui.onNodeWithTag("page-SESSIONS").assertIsSelected()
+            // Resizing and Activity recreation must not replay the host's startup command.
+            ui.activityRule.scenario.recreate()
+            ui.runOnUiThread { connection.terminal.session.write("printf 'START_COUNT:%s\\n' \$SHELLDECK_START_COUNT\n") }
+            ui.waitUntil(5000) { connection.terminal.session.emulator.screen.transcriptText.contains("START_COUNT:1") }
             ui.runOnUiThread { connection.terminal.session.write("printf '\\033]2;Codex project test\\007'; sleep 30\n") }
             ui.waitUntil(5000) { connection.terminal.title == "Codex project test" }
             ui.waitUntil(3000) { ui.onAllNodesWithText("Codex project test", substring = false).fetchSemanticsNodes().isNotEmpty() }
