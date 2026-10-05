@@ -279,6 +279,7 @@ private fun ShellDeckApp(model: ShellDeckModel, activity: MainActivity) {
             }
         }
     }
+    terminal?.let { cc.cherr.shelldeck.terminal.PasteDialog(it) }
     if (hostEditor) HostEditor(editing, model.identities, onDismiss = { hostEditor = false }) { label, hostname, port, username, identity, startup ->
         if (model.saveHost(editing?.id, label, hostname, port, username, identity, startup)) hostEditor = false
     }

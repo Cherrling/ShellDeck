@@ -9,15 +9,28 @@ import cc.cherr.shelldeck.TerminalController
 @Composable
 internal fun rememberSessionTitle(controller: TerminalController): String {
     var displayed by remember(controller) { mutableStateOf(controller.title) }
-    DisposableEffect(controller) {
+    val owner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(controller, owner) {
         val main = Handler(Looper.getMainLooper())
         var pending = false
         val publish = Runnable { pending = false; displayed = controller.title }
         displayed = controller.title
-        val unsubscribe = controller.observeTitle {
-            if (!pending) { pending = true; main.postDelayed(publish, 500) }
+        var unsubscribe: (() -> Unit)? = null
+        fun updateSubscription() {
+            if (owner.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)) {
+                displayed = controller.title
+                if (unsubscribe == null) unsubscribe = controller.observeTitle {
+                    if (!pending) { pending = true; main.postDelayed(publish, 500) }
+                }
+            } else {
+                unsubscribe?.invoke(); unsubscribe = null
+                main.removeCallbacks(publish); pending = false
+            }
         }
-        onDispose { unsubscribe(); main.removeCallbacks(publish) }
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, _ -> updateSubscription() }
+        owner.lifecycle.addObserver(observer)
+        updateSubscription()
+        onDispose { owner.lifecycle.removeObserver(observer); unsubscribe?.invoke(); main.removeCallbacks(publish) }
     }
     return displayed
 }

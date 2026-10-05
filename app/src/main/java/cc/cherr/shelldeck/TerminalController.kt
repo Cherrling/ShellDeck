@@ -3,6 +3,8 @@ package cc.cherr.shelldeck
 import android.app.Application
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import cc.cherr.shelldeck.terminal.*
 import androidx.compose.runtime.mutableIntStateOf
 import android.graphics.Typeface
 import android.view.KeyEvent
@@ -61,7 +63,22 @@ class TerminalController(private val app: Application, private val finished: () 
     }
     private var viewReference = java.lang.ref.WeakReference<TerminalView>(null)
     private val terminalView: TerminalView? get() = viewReference.get()
-    fun createView(context: android.content.Context): TerminalView = TerminalView(context, null).also {
+    var pendingPaste by mutableStateOf<PasteRequest?>(null); private set
+    var pasteError by mutableStateOf<String?>(null); private set
+    fun dismissPaste() { pendingPaste = null; pasteError = null }
+    fun requestPaste(text: String) {
+        if (!session.isReady || terminalView == null || pendingPaste != null) return
+        if (text.length > PasteRequest.MAX_CHARS) { pasteError = "粘贴内容超过 128K 字符，请改用文件上传。"; return }
+        val request = PasteRequest(text)
+        if (request.needsConfirmation) pendingPaste = request else session.emulator?.paste(text)
+    }
+    fun confirmPaste() {
+        val request = pendingPaste ?: return
+        dismissPaste()
+        if (session.isReady && terminalView != null) session.emulator?.paste(request.text)
+    }
+    fun createView(context: android.content.Context): TerminalView = ShellTerminalView(context,
+        { onPasteTextFromClipboard(session) }, ::requestPaste).also {
         viewReference = java.lang.ref.WeakReference(it)
         it.setTerminalViewClient(this)
         it.setTextSize(android.util.TypedValue.applyDimension(android.util.TypedValue.COMPLEX_UNIT_SP, fontSize.toFloat(), context.resources.displayMetrics).toInt())
@@ -69,9 +86,17 @@ class TerminalController(private val app: Application, private val finished: () 
         it.setBackgroundColor(backgroundColor)
         it.isFocusableInTouchMode = true
         it.attachSession(session)
+        it.setOnCreateContextMenuListener { menu, view, _ ->
+            menu.add("粘贴").setEnabled(session.isReady).setOnMenuItemClickListener { onPasteTextFromClipboard(session); true }
+            menu.add("选择文本").setOnMenuItemClickListener { val now = android.os.SystemClock.uptimeMillis()
+                val event = MotionEvent.obtain(now, now, MotionEvent.ACTION_DOWN, view.width / 2f, view.height / 2f, 0)
+                try { (view as TerminalView).startTextSelectionMode(event) } finally { event.recycle() }; true }
+        }
         it.requestFocus()
     }
     fun releaseView(view: TerminalView) {
+        (view as? ShellTerminalView)?.release()
+        dismissPaste()
         modifiers.clear()
         view.setTerminalCursorBlinkerState(false, false)
         view.stopTextSelectionMode()
@@ -92,11 +117,11 @@ class TerminalController(private val app: Application, private val finished: () 
         if (androidx.core.view.ViewCompat.getRootWindowInsets(it)?.isVisible(androidx.core.view.WindowInsetsCompat.Type.ime()) == true)
             controller?.hide(androidx.core.view.WindowInsetsCompat.Type.ime()) else showKeyboard()
     } }
-    fun leave() { modifiers.clear(); terminalView?.let {
+    fun leave() { dismissPaste(); modifiers.clear(); terminalView?.let {
         androidx.core.view.ViewCompat.getWindowInsetsController(it)?.hide(androidx.core.view.WindowInsetsCompat.Type.ime())
     } }
     fun colorsChanged() { session.emulator?.mColors?.reset(); onColorsChanged(session) }
-    fun close() { modifiers.clear(); session.finishIfRunning(); viewReference.clear() }
+    fun close() { dismissPaste(); modifiers.clear(); session.finishIfRunning(); viewReference.clear() }
     override fun onTextChanged(changedSession: TerminalSession) {
         terminalView?.onScreenUpdated()
     }
@@ -107,14 +132,14 @@ class TerminalController(private val app: Application, private val finished: () 
             titleObservers.forEach { it() }
         }
     }
-    override fun onSessionFinished(finishedSession: TerminalSession) = finished()
+    override fun onSessionFinished(finishedSession: TerminalSession) { dismissPaste(); finished() }
     override fun onCopyTextToClipboard(session: TerminalSession, text: String?) {
         val clipboard = app.getSystemService(android.content.ClipboardManager::class.java)
         clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Terminal", text))
     }
     override fun onPasteTextFromClipboard(session: TerminalSession?) {
         app.getSystemService(android.content.ClipboardManager::class.java).primaryClip?.let {
-            if (it.itemCount > 0) session?.emulator?.paste(it.getItemAt(0).coerceToText(app).toString())
+            if (it.itemCount > 0) it.getItemAt(0).text?.let { text -> requestPaste(text.toString()) }
         }
     }
     override fun onBell(session: TerminalSession) = Unit
@@ -137,6 +162,10 @@ class TerminalController(private val app: Application, private val finished: () 
     override fun isTerminalViewSelected() = false
     override fun copyModeChanged(copyMode: Boolean) = Unit
     override fun onKeyDown(keyCode: Int, e: KeyEvent?, session: TerminalSession?): Boolean {
+        if (e != null && e.isCtrlPressed && e.isShiftPressed && keyCode == KeyEvent.KEYCODE_V) {
+            if (e.repeatCount == 0) onPasteTextFromClipboard(session)
+            return true
+        }
         if (e == null || session?.isReady != true || e.isSystem || e.isFunctionPressed || KeyEvent.isModifierKey(keyCode)) return false
         val flags = (if (e.isCtrlPressed || modifiers.active(ModifierKey.CTRL)) KeyHandler.KEYMOD_CTRL else 0) or
             (if (e.isAltPressed || modifiers.active(ModifierKey.ALT)) KeyHandler.KEYMOD_ALT else 0) or
