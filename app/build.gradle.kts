@@ -17,7 +17,7 @@ val signingValues = signingVariables.associateWith { providers.environmentVariab
 
 val buildTime = providers.environmentVariable("SHELLDECK_BUILD_TIME").orElse("Local build (unrecorded)").get()
 val sourceRevision = providers.environmentVariable("SHELLDECK_SOURCE_REVISION").orElse("local").get()
-require(buildTime == "Local build (unrecorded)" || Regex("\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2} UTC").matches(buildTime))
+require(buildTime == "Local build (unrecorded)" || Regex("\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2} UTC\\+8").matches(buildTime))
 require(sourceRevision == "local" || Regex("[0-9a-f]{40}").matches(sourceRevision))
 
 android {

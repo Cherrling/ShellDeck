@@ -61,8 +61,8 @@ def validate_apk_output(badging: str, signatures: str, version: str, code: int, 
 
 
 def build_metadata(version: str, code: int, timestamp: str, revision: str) -> dict:
-    parsed = datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S UTC")
-    if parsed.strftime("%Y-%m-%d %H:%M:%S UTC") != timestamp or not re.fullmatch(r"[0-9a-f]{40}", revision):
+    parsed = datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S UTC+8")
+    if parsed.strftime("%Y-%m-%d %H:%M:%S UTC+8") != timestamp or not re.fullmatch(r"[0-9a-f]{40}", revision):
         raise ValueError("Invalid build timestamp or source revision")
     return {"versionName": version, "versionCode": code, "buildTime": timestamp, "sourceRevision": revision}
 

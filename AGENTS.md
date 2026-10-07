@@ -120,3 +120,5 @@ Terminal 是产品核心。优先保证终端兼容性、稳定性、低功耗�
 - 用户只使用正式签名的 `cc.cherr.shelldeck`，不要再让用户安装 Dev APK。
 - main CI 通过后自动更新 rolling Release；内部 debug 构建仅用于验证。
 - 应用代码更新推送前递增 versionCode，保持同一正式签名。rolling tag 是唯一允许自动移动的发布 tag；`v*` tag 仍保持不可变。
+
+- 以后发布标题、说明、build-info.json 与应用内构建时间统一使用 UTC+8（Asia/Shanghai），显示时明确标注 `UTC+8`。历史 Release 不追溯改写。

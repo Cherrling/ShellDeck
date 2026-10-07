@@ -10,6 +10,10 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.shape.RoundedCornerShape
+import cc.cherr.shelldeck.ui.ManagementHeading
+import cc.cherr.shelldeck.ui.ManagementEmpty
+import cc.cherr.shelldeck.ui.ConnectionBadge
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -135,7 +139,7 @@ private fun ShellDeckApp(model: ShellDeckModel, activity: MainActivity) {
         }
     }
     val volumeChangesFont = terminal != null && closing == null &&
-        connection?.challenge == null && connection?.passphraseIdentity == null && terminal?.promptVisible != true && model.error == null
+        connection?.challenge == null && connection?.passphraseIdentity == null && terminal?.promptVisible != true && terminal?.pendingLink == null && model.error == null
     DisposableEffect(activity, volumeChangesFont) {
         activity.onTerminalFontSizeChange = if (volumeChangesFont) model::adjustFontSize else null
         onDispose { activity.onTerminalFontSizeChange = null }
@@ -175,15 +179,22 @@ private fun ShellDeckApp(model: ShellDeckModel, activity: MainActivity) {
                 }
                 ExtraKeysBar(model.settings.keyboard, terminal, model.settings.keyboardSizing)
             } else {
-                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                    Text(if (showIdentities) "SSH 身份与密钥" else if (page == MainPage.SESSIONS) "活动会话" else page.label,
-                        Modifier.padding(16.dp), style = if (showIdentities) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineMedium)
-                }
+                ManagementHeading(
+                    if (showIdentities) "SSH 身份与密钥" else if (page == MainPage.SESSIONS) "活动会话" else page.label,
+                    if (showIdentities) "供多个服务器共用的认证身份"
+                    else if (page == MainPage.SESSIONS) "${manager.activeCount} 个活动连接 · ${manager.sessions.size} 个会话"
+                    else "${model.hosts.size} 台服务器 · 点击即可连接")
                 if (page == MainPage.HOSTS && !showIdentities) {
-                    OutlinedTextField(hostQuery, { hostQuery = it }, singleLine = true,
+                    TextField(hostQuery, { hostQuery = it }, singleLine = true,
                         keyboardOptions = KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Search),
                         keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = { focusManager.clearFocus() }),
-                        label = { Text("搜索名称、地址或用户名") },
+                        placeholder = { Text("搜索名称、地址或用户名") },
+                        leadingIcon = { Icon(painterResource(R.drawable.ic_search), null) },
+                        shape = RoundedCornerShape(24.dp),
+                        colors = TextFieldDefaults.colors(
+                            focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                            focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent),
                         trailingIcon = { if (hostQuery.isNotEmpty()) IconButton(onClick = { hostQuery = "" }) {
                             Icon(painterResource(R.drawable.ic_close), contentDescription = "清空搜索")
                         } }, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).testTag("host-search"))
@@ -196,22 +207,29 @@ private fun ShellDeckApp(model: ShellDeckModel, activity: MainActivity) {
                 LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp,
                     bottom = if (page == MainPage.HOSTS || showIdentities) 96.dp else 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     if (page == MainPage.SESSIONS) {
-                    if (manager.sessions.isEmpty()) item { Text("还没有会话，从服务器页面开始连接。") }
+                    if (manager.sessions.isEmpty()) item {
+                        ManagementEmpty(R.drawable.ic_sessions, "还没有会话", "从服务器页面开始连接；返回列表后，连接会继续保持。")
+                    }
                     items(manager.sessions, key = { "session:${it.id}" }) { session ->
                         val sessionTitle = cc.cherr.shelldeck.ui.rememberSessionTitle(session.terminal)
-                        OutlinedCard(onClick = { manager.select(session.id) },
+                        Card(onClick = { manager.select(session.id) }, shape = RoundedCornerShape(20.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
                             modifier = Modifier.fillMaxWidth().testTag("session-${session.id}")) {
                             Row(Modifier.padding(start = 12.dp, top = 8.dp, end = 4.dp, bottom = 8.dp),
                                 verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                                Column(Modifier.weight(1f)) {
+                                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                     Text("${session.host.label} · 会话 ${session.number}", style = MaterialTheme.typography.titleMedium,
                                         maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-                                    Text(when {
-                                        session.challenge != null -> "等待确认服务器指纹"
-                                        !session.connected -> session.status
-                                        else -> sessionTitle.ifBlank { session.status }
-                                    }, style = MaterialTheme.typography.bodyMedium, maxLines = 1,
-                                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        ConnectionBadge(session)
+                                        Text(when {
+                                            session.challenge != null -> "等待确认服务器指纹"
+                                            session.passphraseIdentity != null -> if (session.requestingPassword) "等待登录密码" else "等待私钥口令"
+                                            !session.connected -> session.status
+                                            else -> sessionTitle.ifBlank { "Shell 已就绪" }
+                                        }, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, maxLines = 1,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant, overflow = TextOverflow.Ellipsis)
+                                    }
                                 }
                                 var sessionMenu by remember { mutableStateOf(false) }
                                 Box {
@@ -235,20 +253,24 @@ private fun ShellDeckApp(model: ShellDeckModel, activity: MainActivity) {
                     }
                     if (page == MainPage.HOSTS) {
                     if (model.hosts.isEmpty()) item {
-                        Text("添加常用服务器，点击卡片即可连接。私钥可在设置中的「SSH 身份与密钥」导入。")
+                        ManagementEmpty(R.drawable.ic_hosts, "添加第一台服务器", "点击右下角 ＋ 添加连接。私钥可在设置中的「SSH 身份与密钥」生成或导入。")
                     }
                     if (model.hosts.isNotEmpty() && visibleHosts.isEmpty()) item {
-                        Text(if (hostQuery.isNotBlank()) "没有匹配的服务器" else if (hostFilter == HostFilter.FAVORITES) "点击服务器旁的星标即可收藏。" else "还没有最近连接记录。")
+                        ManagementEmpty(if (hostQuery.isNotBlank()) R.drawable.ic_search else R.drawable.ic_hosts,
+                            if (hostQuery.isNotBlank()) "没有匹配的服务器" else if (hostFilter == HostFilter.FAVORITES) "还没有收藏" else "还没有最近连接记录。",
+                            if (hostQuery.isNotBlank()) "试试其他名称、地址或用户名。" else if (hostFilter == HostFilter.FAVORITES) "点击服务器旁的星标即可收藏。" else "连接过的服务器会显示在这里。")
                     }
                     items(visibleHosts, key = { it.id }) { host ->
                         var hostMenu by remember(host.id) { mutableStateOf(false) }
-                        Card(onClick = { if (host.identityId == null) login = host else model.connect(host, "") },
+                        Card(shape = RoundedCornerShape(20.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                            onClick = { if (host.identityId == null) login = host else model.connect(host, "") },
                             enabled = !model.busy, modifier = Modifier.fillMaxWidth().testTag("host-${host.id}")) {
                             Row(Modifier.padding(12.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                                 Column(Modifier.weight(1f)) {
-                                    Text(host.label, style = MaterialTheme.typography.titleMedium)
-                                    Text("${host.username}@${host.hostname}:${host.port}")
-                                    Text(model.identities.firstOrNull { it.id == host.identityId }?.label ?: "密码登录", style = MaterialTheme.typography.bodySmall)
+                                    Text(host.label, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                    Text("${host.username}@${host.hostname}:${host.port}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                    Text(model.identities.firstOrNull { it.id == host.identityId }?.label ?: "密码登录", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 }
                                 IconButton(onClick = { model.toggleFavorite(host.id) }, enabled = !model.busy,
                                     modifier = Modifier.testTag("favorite-${host.id}")) {
@@ -301,6 +323,7 @@ private fun ShellDeckApp(model: ShellDeckModel, activity: MainActivity) {
         cc.cherr.shelldeck.sftp.SftpScreen(session) { filesSession = null }
     }
     terminal?.let {
+        cc.cherr.shelldeck.terminal.LinkDialog(it)
         cc.cherr.shelldeck.terminal.PasteDialog(it)
         cc.cherr.shelldeck.terminal.PromptEditor(it)
     }

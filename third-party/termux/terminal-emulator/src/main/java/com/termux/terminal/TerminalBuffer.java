@@ -361,7 +361,10 @@ public final class TerminalBuffer {
                             lastNonSpaceIndex = i + 1;
                 }
 
+                int lastLink = oldLine.lastHyperlinkColumn();
+                if (lastLink >= 0) lastNonSpaceIndex = Math.max(lastNonSpaceIndex, oldLine.findStartOfColumn(lastLink + 1));
                 int currentOldCol = 0;
+                int hyperlinkAtCol = 0;
                 long styleAtCol = 0;
                 for (int i = 0; i < lastNonSpaceIndex; i++) {
                     // Note that looping over java character, not cells.
@@ -369,7 +372,10 @@ public final class TerminalBuffer {
                     int codePoint = (Character.isHighSurrogate(c)) ? Character.toCodePoint(c, oldLine.mText[++i]) : c;
                     int displayWidth = WcWidth.width(codePoint);
                     // Use the last style if this is a zero-width character:
-                    if (displayWidth > 0) styleAtCol = oldLine.getStyle(currentOldCol);
+                    if (displayWidth > 0) {
+                        styleAtCol = oldLine.getStyle(currentOldCol);
+                        hyperlinkAtCol = oldLine.getHyperlink(currentOldCol);
+                    }
 
                     // Line wrap as necessary:
                     if (currentOutputExternalColumn + displayWidth > mColumns) {
@@ -385,7 +391,7 @@ public final class TerminalBuffer {
 
                     int offsetDueToCombiningChar = ((displayWidth <= 0 && currentOutputExternalColumn > 0) ? 1 : 0);
                     int outputColumn = currentOutputExternalColumn - offsetDueToCombiningChar;
-                    setChar(outputColumn, currentOutputExternalRow, codePoint, styleAtCol);
+                    setChar(outputColumn, currentOutputExternalRow, codePoint, styleAtCol, hyperlinkAtCol);
 
                     if (displayWidth > 0) {
                         if (oldCursorRow == externalOldRow && oldCursorColumn == currentOldCol) {
@@ -521,11 +527,21 @@ public final class TerminalBuffer {
         return (mLines[row] == null) ? (mLines[row] = new TerminalRow(mColumns, 0)) : mLines[row];
     }
 
+    public int getHyperlinkAt(int column, int externalRow) {
+        if (column < 0 || column >= mColumns || externalRow < -mActiveTranscriptRows || externalRow >= mScreenRows) return 0;
+        TerminalRow line = mLines[externalToInternalRow(externalRow)];
+        return line == null ? 0 : line.getHyperlink(column);
+    }
+
     public void setChar(int column, int row, int codePoint, long style) {
+        setChar(column, row, codePoint, style, 0);
+    }
+
+    public void setChar(int column, int row, int codePoint, long style, int hyperlink) {
         if (row  < 0 || row >= mScreenRows || column < 0 || column >= mColumns)
             throw new IllegalArgumentException("TerminalBuffer.setChar(): row=" + row + ", column=" + column + ", mScreenRows=" + mScreenRows + ", mColumns=" + mColumns);
         row = externalToInternalRow(row);
-        allocateFullLineIfNecessary(row).setChar(column, codePoint, style);
+        allocateFullLineIfNecessary(row).setChar(column, codePoint, style, hyperlink);
     }
 
     public long getStyleAt(int externalRow, int column) {

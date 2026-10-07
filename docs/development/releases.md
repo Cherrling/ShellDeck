@@ -109,4 +109,4 @@ python3 scripts/configure_signing.py \
 
 ## 构建追踪
 
-Release 工作流在校验源码时生成一次 `YYYY-MM-DD HH:mm:ss UTC`，通过 SHELLDECK_BUILD_TIME 和 SHELLDECK_SOURCE_REVISION 写入 APK。设置页显示版本号、版本码、同一 UTC 时间和提交短 SHA。发布标题及说明带时间戳，附件 build-info.json 保存完整版本/时间/提交，并受 SHA256SUMS 校验。APK 和源码包文件名继续固定，下载链接不变。未指定这些环境变量的本地构建明确显示未记录时间/local，不冒充正式 CI 构建。
+Release 工作流在校验源码时生成一次 `YYYY-MM-DD HH:mm:ss UTC+8`，通过 SHELLDECK_BUILD_TIME 和 SHELLDECK_SOURCE_REVISION 写入 APK。设置页显示版本号、版本码、同一 UTC+8 时间和提交短 SHA。发布标题及说明带时间戳，附件 build-info.json 保存完整版本/时间/提交，并受 SHA256SUMS 校验。APK 和源码包文件名继续固定，下载链接不变。未指定这些环境变量的本地构建明确显示未记录时间/local，不冒充正式 CI 构建。

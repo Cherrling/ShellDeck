@@ -47,6 +47,8 @@ public final class TerminalRow {
     boolean mLineWrap;
     /** The style bits of each cell in the row. See {@link TextStyle}. */
     final long[] mStyle;
+    // Allocated only for rows containing OSC 8 links. IDs resolve through a bounded emulator table.
+    private int[] mHyperlinks;
     /** If this row might contain chars with width != 1, used for deactivating fast path */
     boolean mHasNonOneWidthOrSurrogateChars;
     /** If this row has a {@link TerminalBitmap}. Used for performance only. */
@@ -67,10 +69,12 @@ public final class TerminalRow {
         final int x2 = line.findStartOfColumn(sourceX2);
         boolean startingFromSecondHalfOfWideChar = (sourceX1 > 0 && line.wideDisplayCharacterStartingAt(sourceX1 - 1));
         final char[] sourceChars = (this == line) ? Arrays.copyOf(line.mText, line.mText.length) : line.mText;
+        final int[] sourceLinks = line.mHyperlinks == null ? null : (this == line ? line.mHyperlinks.clone() : line.mHyperlinks);
         int latestNonCombiningWidth = 0;
         for (int i = x1; i < x2; i++) {
             char sourceChar = sourceChars[i];
             int codePoint = Character.isHighSurrogate(sourceChar) ? Character.toCodePoint(sourceChar, sourceChars[++i]) : sourceChar;
+            boolean partialWideChar = startingFromSecondHalfOfWideChar;
             if (startingFromSecondHalfOfWideChar) {
                 // Just treat copying second half of wide char as copying whitespace.
                 codePoint = ' ';
@@ -82,7 +86,7 @@ public final class TerminalRow {
                 sourceX1 += latestNonCombiningWidth;
                 latestNonCombiningWidth = w;
             }
-            setChar(destinationX, codePoint, line.getStyle(sourceX1));
+            setChar(destinationX, codePoint, line.getStyle(sourceX1), partialWideChar || sourceLinks == null ? 0 : sourceLinks[sourceX1]);
         }
     }
 
@@ -146,13 +150,30 @@ public final class TerminalRow {
     public void clear(long style) {
         Arrays.fill(mText, ' ');
         Arrays.fill(mStyle, style);
+        mHyperlinks = null;
         mSpaceUsed = mColumns;
         mHasNonOneWidthOrSurrogateChars = false;
         mHasTerminalBitmap = false;
     }
 
     // https://github.com/steven676/Android-Terminal-Emulator/commit/9a47042620bec87617f0b4f5d50568535668fe26
+    public int getHyperlink(int column) { return mHyperlinks == null ? 0 : mHyperlinks[column]; }
+
+    int lastHyperlinkColumn() {
+        if (mHyperlinks != null) for (int i = mColumns - 1; i >= 0; i--) if (mHyperlinks[i] != 0) return i;
+        return -1;
+    }
+
+    private void setHyperlink(int column, int link) {
+        if (mHyperlinks == null && link != 0) mHyperlinks = new int[mColumns];
+        if (mHyperlinks != null) mHyperlinks[column] = link;
+    }
+
     public void setChar(int columnToSet, int codePoint, long style) {
+        setChar(columnToSet, codePoint, style, 0);
+    }
+
+    public void setChar(int columnToSet, int codePoint, long style, int hyperlink) {
         if (columnToSet  < 0 || columnToSet >= mStyle.length)
             throw new IllegalArgumentException("TerminalRow.setChar(): columnToSet=" + columnToSet + ", codePoint=" + codePoint + ", style=" + style);
 
@@ -170,6 +191,7 @@ public final class TerminalRow {
                 mHasNonOneWidthOrSurrogateChars = true;
             } else {
                 mText[columnToSet] = (char) codePoint;
+                setHyperlink(columnToSet, hyperlink);
                 return;
             }
         }
@@ -275,9 +297,16 @@ public final class TerminalRow {
                 mSpaceUsed -= nextLen;
             }
         }
+        // Combining marks retain the base cell target; overwriting a wide glyph clears both cells.
+        if (!newIsCombining) {
+            setHyperlink(columnToSet, hyperlink);
+            if (newCodePointDisplayWidth == 2) setHyperlink(columnToSet + 1, hyperlink);
+            else if (oldCodePointDisplayWidth == 2) setHyperlink(columnToSet + 1, 0);
+        }
     }
 
     boolean isBlank() {
+        if (lastHyperlinkColumn() >= 0) return false;
         for (int charIndex = 0, charLen = getSpaceUsed(); charIndex < charLen; charIndex++)
             if (mText[charIndex] != ' ') return false;
         return true;

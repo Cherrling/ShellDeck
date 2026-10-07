@@ -75,6 +75,27 @@ class TerminalController(private val app: Application, private val finished: () 
         promptDraft = ""; promptVisible = false
         return true
     }
+    var pendingLink by mutableStateOf<String?>(null); private set
+    private var linkX = 0f
+    private var linkY = 0f
+    fun dismissLink() { pendingLink = null }
+    private fun requestLink(event: MotionEvent): Boolean {
+        val view = terminalView ?: return false
+        val emulator = session.emulator ?: return false
+        val cell = view.getColumnAndRow(event, true)
+        val target = TerminalLinks.at(emulator, cell[0], cell[1]) ?: return false
+        linkX = event.x; linkY = event.y
+        pendingLink = target
+        return true
+    }
+    fun selectLinkText() {
+        dismissLink()
+        terminalView?.let { view ->
+            val now = android.os.SystemClock.uptimeMillis()
+            val event = MotionEvent.obtain(now, now, MotionEvent.ACTION_DOWN, linkX, linkY, 0)
+            try { view.startTextSelectionMode(event) } finally { event.recycle() }
+        }
+    }
     var pendingPaste by mutableStateOf<PasteRequest?>(null); private set
     var pasteError by mutableStateOf<String?>(null); private set
     fun dismissPaste() { pendingPaste = null; pasteError = null }
@@ -109,7 +130,7 @@ class TerminalController(private val app: Application, private val finished: () 
     }
     fun releaseView(view: TerminalView) {
         (view as? ShellTerminalView)?.release()
-        dismissPaste()
+        dismissPaste(); dismissLink()
         modifiers.clear()
         view.setTerminalCursorBlinkerState(false, false)
         view.stopTextSelectionMode()
@@ -130,11 +151,11 @@ class TerminalController(private val app: Application, private val finished: () 
         if (androidx.core.view.ViewCompat.getRootWindowInsets(it)?.isVisible(androidx.core.view.WindowInsetsCompat.Type.ime()) == true)
             controller?.hide(androidx.core.view.WindowInsetsCompat.Type.ime()) else showKeyboard()
     } }
-    fun leave() { dismissPaste(); modifiers.clear(); terminalView?.let {
+    fun leave() { dismissPaste(); dismissLink(); modifiers.clear(); terminalView?.let {
         androidx.core.view.ViewCompat.getWindowInsetsController(it)?.hide(androidx.core.view.WindowInsetsCompat.Type.ime())
     } }
     fun colorsChanged() { session.emulator?.mColors?.reset(); onColorsChanged(session) }
-    fun close() { promptDraft = ""; promptVisible = false; dismissPaste(); modifiers.clear(); session.finishIfRunning(); viewReference.clear() }
+    fun close() { promptDraft = ""; promptVisible = false; dismissPaste(); dismissLink(); modifiers.clear(); session.finishIfRunning(); viewReference.clear() }
     override fun onTextChanged(changedSession: TerminalSession) {
         terminalView?.onScreenUpdated()
     }
@@ -167,7 +188,11 @@ class TerminalController(private val app: Application, private val finished: () 
     override fun setTerminalShellPid(session: TerminalSession, pid: Int) = Unit
     override fun getTerminalCursorStyle(): Int = 0
     override fun onScale(scale: Float): Float = 1f
-    override fun onSingleTapUp(e: MotionEvent?) = showKeyboard()
+    override fun onSingleTapUp(e: MotionEvent?) {
+        // A mouse-enabled TUI owns taps; its links remain available via long press.
+        if (e != null && session.emulator?.isMouseTrackingActive != true && requestLink(e)) return
+        showKeyboard()
+    }
     override fun shouldBackButtonBeMappedToEscape() = false
     override fun shouldEnforceCharBasedInput() = false
     override fun shouldUseCtrlSpaceWorkaround() = false
@@ -189,7 +214,7 @@ class TerminalController(private val app: Application, private val finished: () 
         return terminalView?.handleKeyCode(keyCode, flags)?.also { if (it) modifiers.consumed() } ?: false
     }
     override fun onKeyUp(keyCode: Int, e: KeyEvent?) = false
-    override fun onLongPress(event: MotionEvent?) = false
+    override fun onLongPress(event: MotionEvent?) = event != null && terminalView?.isSelectingText != true && requestLink(event)
     override fun readControlKey() = modifiers.active(ModifierKey.CTRL)
     override fun readAltKey() = modifiers.active(ModifierKey.ALT)
     override fun readShiftKey() = modifiers.active(ModifierKey.SHIFT)

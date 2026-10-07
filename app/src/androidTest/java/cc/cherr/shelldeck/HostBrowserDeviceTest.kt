@@ -20,6 +20,7 @@ class HostBrowserDeviceTest {
             ui.runOnUiThread { model.saveHost(null, "$prefix A", "127.0.0.1", "1", "deploy", null, "tmux new-session -A -s codex") }; waitSaved()
             val first = model.hosts.first { it.label == "$prefix A" }
             ui.runOnUiThread { model.saveHost(null, "$prefix B", "127.0.0.1", "2", "deploy", null, "tmux new-session -A -s codex") }; waitSaved()
+            ui.onRoot().saveScreenshot("hosts-overview")
             ui.onNodeWithTag("host-search").performTextInput("fixture A")
             ui.onNodeWithTag("host-${first.id}").assertIsDisplayed()
             ui.onNodeWithText("$prefix B", substring = false).assertDoesNotExist()

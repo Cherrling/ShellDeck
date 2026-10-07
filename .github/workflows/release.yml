@@ -46,7 +46,7 @@ jobs:
             python3 scripts/release.py validate "$RELEASE_TAG"
           fi
           source_sha=$(git rev-parse HEAD)
-          build_time=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
+          build_time=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S UTC+8')
           echo "sha=$source_sha" >> "$GITHUB_OUTPUT"
           echo "build_time=$build_time" >> "$GITHUB_OUTPUT"
           echo "SHELLDECK_BUILD_TIME=$build_time" >> "$GITHUB_ENV"

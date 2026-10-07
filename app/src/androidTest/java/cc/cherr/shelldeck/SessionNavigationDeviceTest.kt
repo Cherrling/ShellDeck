@@ -79,6 +79,7 @@ class SessionNavigationDeviceTest {
             ui.waitUntil(5000) { connection.terminal.title == "Codex project test" }
             ui.waitUntil(3000) { ui.onAllNodesWithText("Codex project test", substring = false).fetchSemanticsNodes().isNotEmpty() }
             ui.onNodeWithText("Codex project test", substring = false).assertIsDisplayed()
+            ui.onRoot().saveScreenshot("sessions-overview")
             ui.onNodeWithText("Navigation test host · 会话 ${connection.number}").assertIsDisplayed()
             ui.runOnIdle { assertTrue(androidx.core.view.WindowCompat.getInsetsController(ui.activity.window, ui.activity.window.decorView).isAppearanceLightStatusBars) }
             ui.runOnIdle { assertNull(ui.activity.onTerminalFontSizeChange) }

@@ -429,6 +429,8 @@ public final class TerminalEmulator {
 
     /** The cached value for this emulator for `TerminalView.mTopRow` as sessions/emulators may be switched.*/
     private int mTopRow;
+    private final TerminalHyperlinks mHyperlinks = new TerminalHyperlinks();
+    private int mCurrentHyperlink;
 
     /** If automatic scrolling of terminal is disabled */
     private boolean mAutoScrollDisabled;
@@ -2777,6 +2779,10 @@ public final class TerminalEmulator {
             case 2: // Change window title to T.
                 setTitle(textParameter);
                 break;
+            case 8: // OSC 8 ; params ; URI ST. The id parameter is only needed for hover grouping.
+                int separator = textParameter.indexOf(';');
+                mCurrentHyperlink = separator < 0 ? 0 : mHyperlinks.add(textParameter.substring(separator + 1));
+                break;
             case 4:
                 // P s = 4 ; c ; spec → Change Color Number c to the color specified by spec. This can be a name or RGB
                 // specification as per XParseColor. Any number of c name pairs may be given. The color numbers correspond
@@ -3425,7 +3431,7 @@ public final class TerminalEmulator {
         // so was mCursorCol changed after the offsetDueToCombiningChar conditional by another thread?
         // TODO: Check if there are thread synchronization issues with mCursorCol and mCursorRow, possibly causing others bugs too.
         if (column < 0) column = 0;
-        mScreen.setChar(column, mCursorRow, codePoint, getStyle());
+        mScreen.setChar(column, mCursorRow, codePoint, getStyle(), mCurrentHyperlink);
 
         if (autoWrap && displayWidth > 0)
             mAboutToAutoWrap = (mCursorCol == mRightMargin - displayWidth);
@@ -3483,7 +3489,13 @@ public final class TerminalEmulator {
 
 
     /** Reset terminal state so user can interact with it regardless of present state. */
+    public String getHyperlinkAt(int column, int row) {
+        return mHyperlinks.get(mScreen.getHyperlinkAt(column, row));
+    }
+
     public void reset() {
+        mCurrentHyperlink = 0;
+        mHyperlinks.clear();
         setCursorStyle();
         mArgIndex = 0;
         mContinueSequence = false;
