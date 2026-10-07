@@ -29,9 +29,13 @@ class BackupRepositoryDeviceTest {
                 encryptedKey = sourceVault.encrypt(id, bytes)
             }
             sourceDb.records().insertIdentity(identity)
+            sourceDb.records().saveProxy(ProxyRecord().apply {
+                id = "proxy"; label = "Proxy"; hostname = "127.0.0.1"; authenticated = true
+                encryptedCredentials = sourceVault.encrypt("proxy:$id", byteArrayOf(1,117,112))
+            })
             sourceDb.records().saveHost(HostRecord().apply {
                 id = "host"; label = "Source host"; hostname = "example.com"; username = "dev"; identityId = "identity"
-                startupCommand = "tmux new-session -A -s codex"; favorite = true; lastUsedAt = 42
+                proxyId = "proxy"; startupCommand = "tmux new-session -A -s codex"; favorite = true; lastUsedAt = 42
             })
             val colors = TerminalTheme.preset(TerminalPalette.LIGHT).withColor(2, TerminalTheme.parse("#226688"))
             sourceSettings.saveRestored(AppSettings(theme = ThemeMode.DARK, fontSize = 21, fontId = "missing-imported-font", terminalTheme = colors))
@@ -50,6 +54,9 @@ class BackupRepositoryDeviceTest {
                 val result = target.restore(plan, emptyMap(), emptyMap(), true)
                 assertEquals(1, result.identities); assertEquals(1, result.hosts); assertTrue(result.settingsSaved)
             }
+            assertEquals("proxy", targetDb.records().host("host")!!.proxyId)
+            assertArrayEquals(byteArrayOf(1,117,112), targetVault.decrypt("proxy:proxy", targetDb.records().proxy("proxy")!!.encryptedCredentials))
+            assertEquals(0, targetDb.records().deleteProxy("proxy"))
             val restored = targetDb.records().identity("identity")!!
             assertFalse(identity.encryptedKey.contentEquals(restored.encryptedKey))
             assertArrayEquals(bytes, targetVault.decrypt(restored.id, restored.encryptedKey))
@@ -61,10 +68,12 @@ class BackupRepositoryDeviceTest {
             target.prepare(file, password).use { target.restore(it, emptyMap(), emptyMap(), false) }
             assertEquals("Local edit", targetDb.records().host("host")!!.label)
             target.prepare(file, password).use { plan ->
-                target.restore(plan, mapOf("identity" to RestoreChoice.COPY), mapOf("host" to RestoreChoice.COPY), false)
+                target.restore(plan, mapOf("identity" to RestoreChoice.COPY), mapOf("host" to RestoreChoice.COPY), false, mapOf("proxy" to RestoreChoice.COPY))
             }
             val copy = targetDb.records().hosts().single { it.id != "host" }
             assertNotEquals("identity", copy.identityId)
+            assertNotEquals("proxy", copy.proxyId)
+            assertArrayEquals(byteArrayOf(1,117,112), targetVault.decrypt("proxy:${copy.proxyId}", targetDb.records().proxy(copy.proxyId!!)!!.encryptedCredentials))
             assertArrayEquals(bytes, targetVault.decrypt(copy.identityId!!, targetDb.records().identity(copy.identityId!!)!!.encryptedKey))
             assertEquals("tmux new-session -A -s codex", copy.startupCommand)
             target.prepare(file, password).use { plan ->

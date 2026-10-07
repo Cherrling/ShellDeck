@@ -29,6 +29,7 @@ class BackupController(private val context: Context, private val runtime: Connec
     var busy by mutableStateOf(false); private set
     var menu by mutableStateOf(false)
     var identityChoices by mutableStateOf<Map<String, RestoreChoice>>(emptyMap())
+    var proxyChoices by mutableStateOf<Map<String, RestoreChoice>>(emptyMap())
     var hostChoices by mutableStateOf<Map<String, RestoreChoice>>(emptyMap())
     var restoreSettings by mutableStateOf(false)
     private class PendingSave(val uri: Uri?)
@@ -85,7 +86,7 @@ class BackupController(private val context: Context, private val runtime: Connec
                         val prepared = try { repository.prepare(file, secret) } finally { file.fill(0) }
                         post(discarded = prepared::close) {
                             form = null; preview = prepared
-                            identityChoices = emptyMap(); hostChoices = emptyMap(); restoreSettings = false
+                            identityChoices = emptyMap(); hostChoices = emptyMap(); proxyChoices = emptyMap(); restoreSettings = false
                         }
                     }
                     TransferKind.PRIVATE_KEY -> {
@@ -134,10 +135,10 @@ class BackupController(private val context: Context, private val runtime: Connec
         preview = null
         operation("恢复未完成。本机数据可能已变化，或多个条目选择覆盖同一记录；请重新预览。主机与身份未写入。") {
             try {
-                val result = repository.restore(plan, identities, hosts, settings)
+                val result = repository.restore(plan, identities, hosts, settings, proxyChoices)
                 post {
                     changed()
-                    message = "已恢复 ${result.identities} 个身份、${result.hosts} 个主机。" +
+                    message = "已恢复 ${result.identities} 个身份、${result.hosts} 个主机、${result.proxies} 个代理。" +
                         if (result.settingsSaved) (if (settings) "设置已恢复。" else "本机设置保持不变。")
                         else "主机和身份已保存，但设置保存失败，请重新恢复设置。"
                 }

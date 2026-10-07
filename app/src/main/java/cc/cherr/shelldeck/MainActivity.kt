@@ -327,8 +327,8 @@ private fun ShellDeckApp(model: ShellDeckModel, activity: MainActivity) {
         cc.cherr.shelldeck.terminal.PasteDialog(it)
         cc.cherr.shelldeck.terminal.PromptEditor(it)
     }
-    if (hostEditor) HostEditor(editing, model.identities, model.hosts, onDismiss = { hostEditor = false }) { label, hostname, port, username, identity, startup, jump ->
-        if (model.saveHost(editing?.id, label, hostname, port, username, identity, startup, jump)) hostEditor = false
+    if (hostEditor) HostEditor(editing, model.identities, model.hosts, model.proxies, onDismiss = { hostEditor = false }) { label, hostname, port, username, identity, startup, jump, proxy ->
+        if (model.saveHost(editing?.id, label, hostname, port, username, identity, startup, jump, proxy)) hostEditor = false
     }
     if (addingIdentity) AlertDialog(onDismissRequest = { addingIdentity = false }, title = { Text("添加 SSH Key") },
         text = { Column {
@@ -393,12 +393,13 @@ private fun ConfirmDialog(title: String, message: String, dismiss: () -> Unit, c
 }
 
 @Composable
-private fun HostEditor(host: HostRecord?, identities: List<IdentityRecord>, hosts: List<HostRecord>, onDismiss: () -> Unit,
-    save: (String, String, String, String, String?, String, String?) -> Unit) {
+private fun HostEditor(host: HostRecord?, identities: List<IdentityRecord>, hosts: List<HostRecord>, proxies: List<cc.cherr.shelldeck.data.ProxyRecord>, onDismiss: () -> Unit,
+    save: (String, String, String, String, String?, String, String?, String?) -> Unit) {
     var label by remember { mutableStateOf(host?.label ?: "") }
     var hostname by remember { mutableStateOf(host?.hostname ?: "") }
     var port by remember { mutableStateOf(host?.port?.toString() ?: "22") }
     var username by remember { mutableStateOf(host?.username ?: "root") }
+    var proxy by remember { mutableStateOf(host?.proxyId) }
     var jump by remember { mutableStateOf(host?.jumpHostId) }
     var startup by remember { mutableStateOf(host?.startupCommand ?: "") }
     var identity by remember { mutableStateOf(if (host != null) host.identityId else identities.firstOrNull()?.id) }
@@ -421,12 +422,29 @@ private fun HostEditor(host: HostRecord?, identities: List<IdentityRecord>, host
                     }
                 }
             }
+            Text("SOCKS5 代理")
+            var proxyMenu by remember { mutableStateOf(false) }
+            Box {
+                TextButton(onClick = { proxyMenu = true }) { Text(proxies.firstOrNull { it.id == proxy }?.label ?: "不使用") }
+                DropdownMenu(proxyMenu, onDismissRequest = { proxyMenu = false }) {
+                    DropdownMenuItem(text = { Text("不使用") }, onClick = { proxy = null; proxyMenu = false })
+                    proxies.forEach { option -> DropdownMenuItem(text = { Text(option.label) }, onClick = { proxy = option.id; proxyMenu = false }) }
+                }
+            }
+            val route = runCatching {
+                val candidate = HostRecord().apply { id = host?.id ?: "draft"; this.hostname = hostname; jumpHostId = jump }
+                cc.cherr.shelldeck.ssh.jumpRoute(candidate) { id -> hosts.firstOrNull { it.id == id } }
+            }.getOrNull()
+            Text("路径：手机 → " + (proxies.firstOrNull { it.id == proxy }?.let { "${it.label} → " } ?: "") +
+                (route?.joinToString(" → ") { it.label.ifBlank { it.hostname.ifBlank { "目标服务器" } } } ?: "请检查跳板机配置"),
+                style = MaterialTheme.typography.bodySmall)
+            Text("代理仅用于手机到第一跳；不继承跳板机的代理配置。", style = MaterialTheme.typography.bodySmall)
             Text("认证身份")
             identities.forEach { option ->
                 Row { RadioButton(selected = identity == option.id, onClick = { identity = option.id }); TextButton(onClick = { identity = option.id }) { Text(option.label) } }
             }
             Row { RadioButton(selected = identity == null, onClick = { identity = null }); TextButton(onClick = { identity = null }) { Text("密码登录") } }
-        } }, confirmButton = { TextButton(onClick = { save(label, hostname, port, username, identity, startup, jump) }) { Text("保存") } },
+        } }, confirmButton = { TextButton(onClick = { save(label, hostname, port, username, identity, startup, jump, proxy) }) { Text("保存") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } })
 }
 

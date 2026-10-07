@@ -65,6 +65,28 @@ class BackupCryptoTest {
             assertEquals("tmux attach", it.hosts.single().startupCommand)
         }
     }
+    @Test fun versionTwoBackupWithoutProxyFieldsStillDecodes() {
+        val bytes = java.io.ByteArrayOutputStream(); val out = java.io.DataOutputStream(bytes)
+        fun text(value: String) { val b = value.toByteArray(); out.writeInt(b.size); out.write(b) }
+        out.writeInt(2); text("{}"); out.writeInt(0); out.writeInt(1)
+        text("old"); text("Old"); text("old.example"); out.writeInt(22); text("dev")
+        out.writeBoolean(false); out.writeBoolean(false); text(""); out.writeBoolean(false); out.writeLong(0)
+        BackupCodec.decode(bytes.toByteArray()).use { assertNull(it.hosts.single().proxyId); assertTrue(it.proxies.isEmpty()) }
+    }
+    @Test fun proxyCredentialsAndReferencesRoundTripAndRejectDanglingIds() {
+        val proxy = cc.cherr.shelldeck.data.ProxyRecord().apply { id = "proxy"; label = "Proxy"; hostname = "127.0.0.1"; authenticated = true }
+        val host = HostRecord().apply { id = "host"; label = "Host"; hostname = "host.invalid"; username = "dev"; proxyId = proxy.id }
+        val secret = byteArrayOf(1, 117, 112)
+        BackupData(emptyList(), listOf(host), "{}", listOf(BackupProxy(proxy, secret))).use { data ->
+            val bytes = BackupCodec.encode(data)
+            BackupCodec.decode(bytes).use { restored ->
+                assertEquals("proxy", restored.hosts.single().proxyId)
+                assertArrayEquals(secret, restored.proxies.single().credentials)
+            }
+            host.proxyId = "missing"; assertThrows(Exception::class.java) { BackupCodec.encode(data) }
+        }
+        assertArrayEquals(ByteArray(3), secret)
+    }
     @Test fun fileReadIsBoundedBeforeDecrypting() {
         assertThrows(Exception::class.java) { readBackupFile(ByteArrayInputStream(ByteArray(BackupCrypto.MAX_FILE + 1))) }
     }

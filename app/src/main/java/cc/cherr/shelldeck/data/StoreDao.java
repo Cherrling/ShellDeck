@@ -5,6 +5,10 @@ import java.util.List;
 
 @Dao
 public interface StoreDao {
+    @Query("SELECT * FROM proxies ORDER BY label COLLATE NOCASE") List<ProxyRecord> proxies();
+    @Query("SELECT * FROM proxies WHERE id = :id") ProxyRecord proxy(String id);
+    @Upsert void saveProxy(ProxyRecord proxy);
+    @Query("DELETE FROM proxies WHERE id = :id AND NOT EXISTS (SELECT 1 FROM hosts WHERE proxyId = :id)") int deleteProxy(String id);
     @Query("SELECT * FROM hosts ORDER BY label COLLATE NOCASE") List<HostRecord> hosts();
     @Query("SELECT * FROM identities ORDER BY label COLLATE NOCASE") List<IdentityRecord> identities();
     @Query("SELECT * FROM identities WHERE id = :id") IdentityRecord identity(String id);

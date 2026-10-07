@@ -28,7 +28,7 @@ import org.json.JSONArray
 
 private enum class SettingsPage(val title: String) {
     HOME("设置"), APPEARANCE("应用外观"), FONT("字体与字号"), COLORS("终端配色"),
-    KEYBOARD("快捷键"), CONNECTION("连接与后台"), ABOUT("关于 ShellDeck")
+    KEYBOARD("快捷键"), CONNECTION("连接与后台"), PROXIES("SOCKS 代理"), ABOUT("关于 ShellDeck")
 }
 private enum class SettingPicker { THEME, PALETTE, KEEP_ALIVE }
 
@@ -55,6 +55,7 @@ fun SettingsScreen(model: ShellDeckModel, onIdentities: () -> Unit = {}, onEdito
         return
     }
     BackHandler { if (page == SettingsPage.HOME) onBack() else page = SettingsPage.HOME }
+    if (page == SettingsPage.PROXIES) { cc.cherr.shelldeck.proxy.ProxyScreen(model); return }
     val settings = model.settings
     val fontName = model.fonts.firstOrNull { it.id == settings.fontId }?.label ?: "加载中…"
     val paletteName = if (settings.terminalTheme != null) "自定义配色" else paletteLabel(settings.palette)
@@ -109,8 +110,10 @@ fun SettingsScreen(model: ShellDeckModel, onIdentities: () -> Unit = {}, onEdito
                     }
                     SettingsNote("两行整体左右滑动。修饰键点按用于下一次输入；按住持续生效；长按后松手锁定，再点解除。")
                 }
+                SettingsPage.PROXIES -> Unit
                 SettingsPage.CONNECTION -> {
                     SettingsGroup("SSH 连接") {
+                        SettingsLink("SOCKS 代理", "${model.proxies.size} 个配置 · 检测延迟与出口 IP", R.drawable.ic_connection) { page = SettingsPage.PROXIES }
                         SettingsLink("保活探测", keepAliveLabel(settings.keepAliveSeconds), R.drawable.ic_connection) { selection = SettingPicker.KEEP_ALIVE }
                     }
                     SettingsNote("新连接生效。连续三次探测未获响应后结束连接，不自动重连。关闭可减少空闲网络活动，但失效连接可能更晚被发现。")

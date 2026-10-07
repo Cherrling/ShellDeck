@@ -35,6 +35,8 @@ class ShellDeckModel(application: Application) : AndroidViewModel(application) {
     var fontBusy by mutableStateOf(false); private set
     private var fontRequest = 0L
     var hosts by mutableStateOf<List<HostRecord>>(emptyList()); private set
+    var proxies by mutableStateOf<List<ProxyRecord>>(emptyList()); private set
+    fun proxyChecks() = cc.cherr.shelldeck.proxy.ProxyChecks(getApplication(), vault)
     var identities by mutableStateOf<List<IdentityRecord>>(emptyList()); private set
     private var working by mutableStateOf(false)
     val backup = cc.cherr.shelldeck.backup.BackupController(application, runtime) { refresh(); updateSettings(settingsStore.read()) }
@@ -92,7 +94,7 @@ class ShellDeckModel(application: Application) : AndroidViewModel(application) {
     fun clearError() { error = null }
     private fun refresh() = worker.execute { reload() }
     private fun reload() {
-        try { val h = dao.hosts(); val i = dao.identities(); post { hosts = h; identities = i } }
+        try { val h = dao.hosts(); val i = dao.identities(); val p = dao.proxies(); post { hosts = h; identities = i; proxies = p } }
         catch (_: Exception) { post { error = "无法读取本地数据" } }
     }
     private fun operation(failure: String, action: () -> Unit) {
@@ -104,7 +106,7 @@ class ShellDeckModel(application: Application) : AndroidViewModel(application) {
             finally { post { working = false } }
         }
     }
-    fun saveHost(id: String?, label: String, hostname: String, port: String, username: String, identityId: String?, startupCommand: String = "", jumpHostId: String? = null): Boolean {
+    fun saveHost(id: String?, label: String, hostname: String, port: String, username: String, identityId: String?, startupCommand: String = "", jumpHostId: String? = null, proxyId: String? = null): Boolean {
         val number = port.toIntOrNull()
         val host = hostname.trim().removeSurrounding("[", "]").lowercase(Locale.ROOT)
         if (host.isBlank() || host.any { it.isWhitespace() || it == '/' } || number == null || number !in 1..65535 || username.isBlank()) {
@@ -113,6 +115,7 @@ class ShellDeckModel(application: Application) : AndroidViewModel(application) {
         if (runCatching { startupCommandLine(startupCommand) }.isFailure) {
             error = "启动命令必须是单行、不含控制字符，且不超过 4095 字节"; return false
         }
+        if (proxyId != null && proxies.none { it.id == proxyId }) { error = "代理配置不存在"; return false }
         val candidate = HostRecord().apply { this.id = id ?: "new-host"; this.jumpHostId = jumpHostId }
         try {
             val merged = (hosts.filter { it.id != candidate.id } + candidate).associateBy { it.id }
@@ -120,21 +123,54 @@ class ShellDeckModel(application: Application) : AndroidViewModel(application) {
         }
         catch (failure: IllegalArgumentException) { error = failure.message; return false }
         operation("服务器保存失败") {
+            require(proxyId == null || dao.proxy(proxyId) != null)
             val record = if (id == null) HostRecord() else requireNotNull(dao.host(id))
             dao.saveHost(record.apply {
                 this.id = id ?: UUID.randomUUID().toString(); this.label = label.trim().ifBlank { host }
                 this.hostname = host; this.port = number; this.username = username.trim(); this.identityId = identityId
-                this.startupCommand = startupCommand; this.jumpHostId = jumpHostId
+                this.startupCommand = startupCommand; this.jumpHostId = jumpHostId; this.proxyId = proxyId
             })
         }
         return true
     }
+    fun saveProxy(id: String?, label: String, hostname: String, port: String, remoteDns: Boolean,
+        authenticated: Boolean, username: String, password: String, replaceCredentials: Boolean, saved: () -> Unit): Boolean {
+        val record = ProxyRecord().apply {
+            this.id = id ?: UUID.randomUUID().toString(); this.label = label.trim()
+            this.hostname = hostname.trim().removeSurrounding("[", "]"); this.port = port.toIntOrNull() ?: 0
+            this.remoteDns = remoteDns; this.authenticated = authenticated
+        }
+        if (runCatching { cc.cherr.shelldeck.proxy.validateProxy(record) }.isFailure) {
+            error = "请填写有效的名称、代理地址和端口（1–65535）"; return false
+        }
+        val credentials = if (authenticated && replaceCredentials) {
+            val u = username.toByteArray(); val p = password.toByteArray()
+            if (u.size !in 1..255 || p.size !in 1..255) {
+                u.fill(0); p.fill(0); error = "代理用户名和密码必须各为 1–255 个 UTF-8 字节"; return false
+            }
+            cc.cherr.shelldeck.proxy.ProxyCredentials(u, p)
+        } else null
+        if (busy || cleared) { credentials?.close(); return false }
+        operation("代理保存失败，请检查设备加密密钥是否可用") {
+            try {
+                record.encryptedCredentials = when {
+                    !authenticated -> byteArrayOf()
+                    credentials != null -> { val bytes = credentials.encode()
+                        try { vault.encrypt("proxy:${record.id}", bytes) } finally { bytes.fill(0) } }
+                    else -> requireNotNull(dao.proxy(record.id)).also { require(it.authenticated) }.encryptedCredentials
+                }
+                dao.saveProxy(record); post(saved)
+            } finally { credentials?.close() }
+        }
+        return true
+    }
+    fun deleteProxy(id: String) = operation("代理仍被服务器引用，请先修改相关服务器") { check(dao.deleteProxy(id) == 1) }
     fun toggleFavorite(id: String) = operation("收藏更新失败") { dao.toggleFavorite(id) }
     fun duplicateHost(id: String) = operation("复制服务器失败") {
         val original = requireNotNull(dao.host(id))
         dao.saveHost(HostRecord().apply {
             this.id = UUID.randomUUID().toString(); label = "${original.label}（副本）"
-            hostname = original.hostname; port = original.port; username = original.username; identityId = original.identityId; startupCommand = original.startupCommand; jumpHostId = original.jumpHostId
+            hostname = original.hostname; port = original.port; username = original.username; identityId = original.identityId; startupCommand = original.startupCommand; jumpHostId = original.jumpHostId; proxyId = original.proxyId
         })
     }
     private fun markUsed(host: HostRecord) {

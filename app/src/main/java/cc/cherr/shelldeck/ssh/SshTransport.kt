@@ -27,6 +27,7 @@ class SshTransport(
     private val startupCommand: String = "",
     private val route: (() -> List<SshHop>)? = null,
     private val keepAliveSeconds: Int = 60,
+    private val connectFirst: ((Socket, String, Int) -> Unit)? = null,
 ) : TerminalTransport {
     private val closed = AtomicBoolean()
     private val outputLock = Any()
@@ -72,7 +73,10 @@ class SshTransport(
                     current.transport.timeoutMs = 120_000
                     current.addHostKeyVerifier(hop.verify)
                     status(ConnectionState.CONNECTING)
-                    if (previous == null) current.connect(hop.hostname, hop.port)
+                    if (previous == null) {
+                        connectFirst?.invoke(socket, hop.hostname, hop.port)
+                        current.connect(hop.hostname, hop.port)
+                    }
                     else current.connectVia(previous!!.newDirectConnection(hop.hostname, hop.port))
                     check(!closed.get())
                     current.transport.timeoutMs = 20_000
@@ -108,6 +112,12 @@ class SshTransport(
                 if (!closed.get()) status(ConnectionState.ENDED)
             } catch (failure: Exception) {
                 if (!closed.get()) status(when (failure) {
+                    is cc.cherr.shelldeck.proxy.ProxyFailure -> when (failure.kind) {
+                        cc.cherr.shelldeck.proxy.ProxyFailure.Kind.AUTH -> ConnectionState.PROXY_AUTH_FAILED
+                        cc.cherr.shelldeck.proxy.ProxyFailure.Kind.TIMEOUT -> ConnectionState.PROXY_TIMEOUT
+                        cc.cherr.shelldeck.proxy.ProxyFailure.Kind.REJECTED -> ConnectionState.PROXY_REJECTED
+                        else -> ConnectionState.PROXY_FAILED
+                    }
                     is net.schmizz.sshj.userauth.UserAuthException -> ConnectionState.AUTH_FAILED
                     is java.net.UnknownHostException -> ConnectionState.ADDRESS_FAILED
                     is java.net.ConnectException -> ConnectionState.CONNECT_FAILED

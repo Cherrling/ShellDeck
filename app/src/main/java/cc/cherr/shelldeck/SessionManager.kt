@@ -106,6 +106,12 @@ class SessionConnection(application: Application, val host: HostRecord, dao: Sto
             status = { value -> main.post { if (!disposed && !ended && !state.terminal) state = value } },
             startupCommand = host.startupCommand,
             route = { jumpRoute(host, dao::host).map(::hop) },
+            connectFirst = host.proxyId?.let { proxyId -> { socket, target, port ->
+                val proxy = dao.proxy(proxyId) ?: throw cc.cherr.shelldeck.proxy.ProxyFailure(cc.cherr.shelldeck.proxy.ProxyFailure.Kind.CONNECT)
+                cc.cherr.shelldeck.proxy.proxyCredentials(proxy, vault).use { credentials ->
+                    cc.cherr.shelldeck.proxy.Socks5.connect(socket, proxy, target, port, credentials)
+                }
+            } },
             keepAliveSeconds = cc.cherr.shelldeck.settings.SettingsStore(application).read().keepAliveSeconds)
         terminal.session = TerminalSession(transport, 5000, terminal)
         // Start independently of composition; a quick navigation must not leave an unstarted connection.

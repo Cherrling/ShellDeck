@@ -11,5 +11,9 @@ enum class ConnectionState(val message: String, val terminal: Boolean = false) {
     CONNECT_FAILED("无法连接服务器，请检查地址与端口", true),
     TIMEOUT("连接超时", true),
     IO_FAILED("连接已中断，或待发送输入超过限制", true),
+    PROXY_AUTH_FAILED("代理认证失败，请检查代理用户名和密码", true),
+    PROXY_TIMEOUT("代理连接或握手超时", true),
+    PROXY_REJECTED("代理拒绝连接目标服务器", true),
+    PROXY_FAILED("代理连接失败，请检查代理配置及网络", true),
     FAILED("连接失败：请检查网络、服务器指纹及认证信息", true)
 }

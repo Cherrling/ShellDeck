@@ -43,7 +43,7 @@ fun BackupDialogs(controller: BackupController) {
         AlertDialog(onDismissRequest = controller::cancel, title = { Text("恢复预览") },
             text = { LazyColumn(Modifier.heightIn(max = 420.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 item {
-                    Text("${plan.identityEntries.size} 个身份 · ${plan.hostEntries.size} 个主机")
+                    Text("${plan.identityEntries.size} 个身份 · ${plan.hostEntries.size} 个主机 · ${plan.proxyEntries.size} 个代理")
                     Text("重复条目默认保留本机。使用备份会覆盖所列记录；导入副本会创建独立条目。", style = MaterialTheme.typography.bodySmall)
                     Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                         Checkbox(controller.restoreSettings, { controller.restoreSettings = it }); Text("同时恢复设置")
@@ -55,6 +55,12 @@ fun BackupDialogs(controller: BackupController) {
                 items(plan.identityEntries, key = { "identity:${it.id}" }) { entry ->
                     RestoreItem(entry, controller.identityChoices[entry.id] ?: RestoreChoice.KEEP) {
                         controller.identityChoices = controller.identityChoices + (entry.id to it)
+                    }
+                }
+                if (plan.proxyEntries.isNotEmpty()) item { Text("代理", style = MaterialTheme.typography.titleMedium) }
+                items(plan.proxyEntries, key = { "proxy:${it.id}" }) { entry ->
+                    RestoreItem(entry, controller.proxyChoices[entry.id] ?: RestoreChoice.KEEP) {
+                        controller.proxyChoices = controller.proxyChoices + (entry.id to it)
                     }
                 }
                 if (plan.hostEntries.isNotEmpty()) item { Text("主机", style = MaterialTheme.typography.titleMedium) }

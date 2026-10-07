@@ -113,6 +113,7 @@ Terminal 是产品核心。优先保证终端兼容性、稳定性、低功耗�
 - 发布校验测试：`python3 -m unittest discover -s scripts -p 'test_*.py'`。
 - 版本统一维护在 `version.properties`；发布前递增 versionCode，tag 与 versionName 严格对应。
 - Release 必须使用显式签名配置，禁止回退 debug key；详细说明见 `docs/development/releases.md`。
+- 已支持 SOCKS5 第一跳代理与 Cloudflare 手动检测；Room v5、加密备份负载 v3（兼容读取 v1/v2），设计见 `docs/research/socks-proxy.md`。
 - 已集成 Termux、SSHJ、Host/Identity 管理与加密密钥登录。安全设计见 docs/research/ssh-key-integration.md。上游来源与补丁见 third-party/termux/README.md；修改组件时必须更新补丁记录并运行 scripts/check_termux.py。
 
 ## 日常分发约定

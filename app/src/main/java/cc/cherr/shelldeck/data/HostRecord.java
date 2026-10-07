@@ -13,6 +13,7 @@ public class HostRecord {
     @NonNull public String username = "";
     @Nullable public String identityId;
     @Nullable public String jumpHostId;
+    @Nullable public String proxyId;
     @NonNull @ColumnInfo(defaultValue = "''") public String startupCommand = "";
     @ColumnInfo(defaultValue = "0") public boolean favorite = false;
     @ColumnInfo(defaultValue = "0") public long lastUsedAt = 0;

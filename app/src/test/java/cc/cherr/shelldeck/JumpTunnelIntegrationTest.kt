@@ -34,14 +34,16 @@ class JumpTunnelIntegrationTest {
             HostTrust(host, port, { null }, {}) { verified.incrementAndGet(); TrustDecision.ONCE },
             { ssh -> ssh.authPublickey(user, SshKeys.load(ssh, File(root, "ed25519").readBytes(), charArrayOf())) })
         val entry = hop()
-        val transport = SshTransport(entry.hostname, port, user, entry.verify, entry.authenticate, {}, route = { listOf(hop(), hop("localhost")) })
+        val proxy = TestSocksProxy(port)
+        val transport = SshTransport(entry.hostname, port, user, entry.verify, entry.authenticate, {}, route = { listOf(hop("only-on-proxy.invalid"), hop("localhost")) },
+            connectFirst = { socket, host, p -> cc.cherr.shelldeck.proxy.Socks5.connect(socket, proxy.record, host, p, null) })
         transport.start(TerminalSize(80, 24, 8, 16), object : TerminalTransport.Listener {
             override fun onReady() { ready.countDown() }
             override fun onBytes(bytes: ByteArray, length: Int) {}
             override fun onClosed(code: Int) { closed.countDown() }
         })
         try {
-            assertTrue(ready.await(20, TimeUnit.SECONDS)); assertEquals(2, verified.get())
+            assertTrue(ready.await(20, TimeUnit.SECONDS)); assertEquals(2, verified.get()); assertEquals("only-on-proxy.invalid", proxy.requestedHost.get()); assertNull(proxy.failure.get())
             ServerSocket(0, 1, java.net.InetAddress.getByName("127.0.0.1")).use { server ->
                 val worker = Thread { server.accept().use { socket ->
                     val bytes = socket.getInputStream().readNBytes(5)
@@ -86,6 +88,6 @@ class JumpTunnelIntegrationTest {
                 assertEquals("remote endpoint receives EOF instead of timing out", -1, remoteRead.get())
             }
             transport.openSftp().use { assertTrue(it.canonicalize(".").isNotBlank()) }
-        } finally { transport.close(); assertTrue(closed.await(15, TimeUnit.SECONDS)) }
+        } finally { transport.close(); proxy.close(); assertTrue(closed.await(15, TimeUnit.SECONDS)) }
     }
 }

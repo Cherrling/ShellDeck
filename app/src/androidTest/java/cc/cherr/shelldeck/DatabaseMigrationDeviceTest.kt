@@ -12,6 +12,7 @@ class DatabaseMigrationDeviceTest {
     @Test fun versionOneKeepsCredentialsHostReferencesAndKnownHostPins() = verifyMigration(1)
     @Test fun versionTwoKeepsCredentialsAndHostHistory() = verifyMigration(2)
     @Test fun versionThreeKeepsSettingsAndAddsDirectRoute() = verifyMigration(3)
+    @Test fun versionFourAddsProxiesWithoutChangingExistingConnections() = verifyMigration(4)
     private fun verifyMigration(version: Int) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
@@ -38,13 +39,13 @@ class DatabaseMigrationDeviceTest {
                 if (version >= 2) old.execSQL("UPDATE hosts SET favorite = 1, lastUsedAt = 42")
                 old.version = version
             }
-            val db = Room.databaseBuilder(context, ShellDeckDatabase::class.java, name).addMigrations(ShellDeckDatabase.MIGRATION_1_2, ShellDeckDatabase.MIGRATION_2_3, ShellDeckDatabase.MIGRATION_3_4).build()
+            val db = Room.databaseBuilder(context, ShellDeckDatabase::class.java, name).addMigrations(ShellDeckDatabase.MIGRATION_1_2, ShellDeckDatabase.MIGRATION_2_3, ShellDeckDatabase.MIGRATION_3_4, ShellDeckDatabase.MIGRATION_4_5).build()
             try {
                 val dao = db.records()
                 val host = dao.host("host")!!
                 assertEquals("identity", host.identityId); assertEquals("My host", host.label)
                 assertEquals(version >= 2, host.favorite); assertEquals(if (version >= 2) 42L else 0L, host.lastUsedAt)
-                assertNull(host.jumpHostId); assertEquals("", host.startupCommand); assertNull(dao.identity("identity")!!.publicKey)
+                assertNull(host.proxyId); assertTrue(dao.proxies().isEmpty()); assertNull(host.jumpHostId); assertEquals("", host.startupCommand); assertNull(dao.identity("identity")!!.publicKey)
                 assertArrayEquals(encrypted, dao.identity("identity")!!.encryptedKey)
                 assertArrayEquals(fixture, vault.decrypt("identity", dao.identity("identity")!!.encryptedKey))
                 assertEquals("SHA256:server", dao.knownHost("example.com", 22)!!.fingerprint)
@@ -52,7 +53,7 @@ class DatabaseMigrationDeviceTest {
                 assertEquals(version < 2, dao.host(host.id)!!.favorite); assertEquals(123L, dao.host(host.id)!!.lastUsedAt)
             } finally { db.close() }
             // Reopen without replaying the migration; the generated v3 schema must remain valid.
-            val reopened = Room.databaseBuilder(context, ShellDeckDatabase::class.java, name).addMigrations(ShellDeckDatabase.MIGRATION_1_2, ShellDeckDatabase.MIGRATION_2_3, ShellDeckDatabase.MIGRATION_3_4).build()
+            val reopened = Room.databaseBuilder(context, ShellDeckDatabase::class.java, name).addMigrations(ShellDeckDatabase.MIGRATION_1_2, ShellDeckDatabase.MIGRATION_2_3, ShellDeckDatabase.MIGRATION_3_4, ShellDeckDatabase.MIGRATION_4_5).build()
             try {
                 assertEquals(version < 2, reopened.records().host("host")!!.favorite)
                 assertEquals(123L, reopened.records().host("host")!!.lastUsedAt)
