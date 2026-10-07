@@ -30,7 +30,7 @@ Terminal 是产品核心。优先保证终端兼容性、稳定性、低功耗�
 | SSH | 优先研究 SSHJ |
 | 本地结构化数据 | Room |
 | 凭据保护 | Android Keystore 保护加密密钥，凭据以加密 blob 存储 |
-| Mosh | 后续研究，不预设具体实现 |
+| Mosh | 基础直连：SSHJ 引导 + 原生 Mosh 1.4.0 子进程，设计见 docs/research/mosh.md |
 
 - 不从零实现 Terminal Emulator，也不直接 fork 整个 Termux 或 Moke 作为产品起点。
 - 首先研究 Termux 当前模块结构、License、第三方集成方式、发布与依赖可用性、API 和 View / Compose 互操作。
@@ -109,11 +109,12 @@ Terminal 是产品核心。优先保证终端兼容性、稳定性、低功耗�
 
 - 正式 applicationId：`cc.cherr.shelldeck`（用户持有 cherr.cc），开发版加 `.debug`。
 - 初始工程采用 minSdk 26、compileSdk / targetSdk 36；工具版本在 `gradle/libs.versions.toml` 和 Gradle Wrapper 中固定。
+- 首次构建或修改原生源码后先在本地存储副本执行 `python3 scripts/build_mosh.py`，需要 NDK `29.0.14206865`；Mosh 原生构建、测试和首版边界见 `docs/research/mosh.md`。
 - Debug 验证：`python3 scripts/ssh_test_server.py -- ./gradlew :app:lintDebug :app:testDebugUnitTest :terminal-emulator:testDebugUnitTest :app:assembleDebug`。终端模块包含上游与会话接入测试；不能把 app 的 NO-SOURCE 当成测试通过。
 - 发布校验测试：`python3 -m unittest discover -s scripts -p 'test_*.py'`。
 - 版本统一维护在 `version.properties`；发布前递增 versionCode，tag 与 versionName 严格对应。
 - Release 必须使用显式签名配置，禁止回退 debug key；详细说明见 `docs/development/releases.md`。
-- 已支持 SOCKS5 第一跳代理与 Cloudflare 手动检测；Room v5、加密备份负载 v3（兼容读取 v1/v2），设计见 `docs/research/socks-proxy.md`。
+- 已支持 SOCKS5 第一跳代理与 Cloudflare 手动检测；Room v6、加密备份负载 v4（兼容读取 v1/v2/v3），设计见 `docs/research/socks-proxy.md`。
 - 已集成 Termux、SSHJ、Host/Identity 管理与加密密钥登录。安全设计见 docs/research/ssh-key-integration.md。上游来源与补丁见 third-party/termux/README.md；修改组件时必须更新补丁记录并运行 scripts/check_termux.py。
 
 ## 日常分发约定

@@ -45,7 +45,7 @@ object BackupCodec {
         validate(data)
         return WipingBuffer(BackupCrypto.MAX_PLAINTEXT).use { buffer ->
             val out = DataOutputStream(buffer)
-            out.writeInt(3); out.text(data.settings, MAX_SETTINGS)
+            out.writeInt(4); out.text(data.settings, MAX_SETTINGS)
             out.writeInt(data.identities.size)
             data.identities.forEach { entry ->
                 val key = entry.record
@@ -60,6 +60,7 @@ object BackupCodec {
                 out.writeBoolean(host.jumpHostId != null); host.jumpHostId?.let { out.text(it) }
                 out.writeBoolean(host.proxyId != null); host.proxyId?.let { out.text(it) }
                 out.text(host.startupCommand); out.writeBoolean(host.favorite); out.writeLong(host.lastUsedAt)
+                out.text(host.protocol); out.writeInt(host.moshPort)
             }
             out.writeInt(data.proxies.size)
             data.proxies.forEach { entry ->
@@ -76,7 +77,7 @@ object BackupCodec {
         val proxies = mutableListOf<BackupProxy>()
         try {
             val input = DataInputStream(ByteArrayInputStream(bytes))
-            val version = input.readInt(); require(version in 1..3)
+            val version = input.readInt(); require(version in 1..4)
             val settings = input.text(MAX_SETTINGS)
             repeat(input.readInt().also { require(it in 0..1000) }) {
                 val record = IdentityRecord().apply {
@@ -92,6 +93,7 @@ object BackupCodec {
                     jumpHostId = if (version >= 2 && input.readBoolean()) input.text() else null
                     proxyId = if (version >= 3 && input.readBoolean()) input.text() else null
                     startupCommand = input.text(); favorite = input.readBoolean(); lastUsedAt = input.readLong()
+                    if (version >= 4) { protocol = input.text(); moshPort = input.readInt() }
                 }
             }
             if (version >= 3) repeat(input.readInt().also { require(it in 0..1000) }) {
@@ -124,6 +126,7 @@ object BackupCodec {
         data.hosts.forEach {
             require(it.id.isNotBlank() && it.label.isNotBlank() && it.hostname.isNotBlank() && it.username.isNotBlank())
             require(it.proxyId == null || it.proxyId in proxyIds)
+            cc.cherr.shelldeck.mosh.validateMoshHost(it)
             require(it.port in 1..65535 && it.lastUsedAt >= 0 && (it.identityId == null || it.identityId in ids))
             require(it.hostname.none { char -> char.isWhitespace() || char == '/' || char.isISOControl() })
             cc.cherr.shelldeck.ssh.jumpRoute(it) { id -> data.hosts.firstOrNull { host -> host.id == id } }

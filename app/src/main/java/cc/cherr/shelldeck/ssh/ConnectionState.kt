@@ -15,5 +15,11 @@ enum class ConnectionState(val message: String, val terminal: Boolean = false) {
     PROXY_TIMEOUT("代理连接或握手超时", true),
     PROXY_REJECTED("代理拒绝连接目标服务器", true),
     PROXY_FAILED("代理连接失败，请检查代理配置及网络", true),
+    MOSH_STARTING("正在启动 Mosh…"),
+    MOSH_ACTIVE("Mosh 已启动 · 连接及断网状态见终端"),
+    MOSH_MISSING("远端未安装 mosh-server", true),
+    MOSH_START_FAILED("Mosh 启动失败，请检查服务器版本与 UTF-8 locale", true),
+    MOSH_UNSUPPORTED("Mosh 暂不支持此连接配置", true),
+    MOSH_NATIVE_FAILED("Mosh 客户端未能运行", true),
     FAILED("连接失败：请检查网络、服务器指纹及认证信息", true)
 }

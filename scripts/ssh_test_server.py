@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import shutil
 import socket
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -48,6 +49,14 @@ def main():
         subprocess.run(["openssl", "ec", "-in", str(root / "ecdsa-pem"), "-no_public", "-out", str(root / "ecdsa-no-public")], check=True, stderr=subprocess.DEVNULL)
         subprocess.run(["openssl", "pkcs8", "-topk8", "-nocrypt", "-in", str(root / "ecdsa-no-public"), "-out", str(root / "ecdsa-pkcs8")], check=True)
         (root / "test-shell").write_text('#!/bin/sh\nif [ -n "$SSH_ORIGINAL_COMMAND" ]; then exec /bin/sh -c "$SSH_ORIGINAL_COMMAND"; else exec /bin/bash --noprofile --norc -i; fi\n')
+        if os.environ.get("SSH_TEST_MOSH_BIN"):
+            # Optional isolated Mosh fixture; never modifies the system installation.
+            binary = Path(os.environ["SSH_TEST_MOSH_BIN"]).resolve()
+            if not binary.is_file():
+                raise ValueError("SSH_TEST_MOSH_BIN must name an existing executable")
+            (root / "mosh-server").symlink_to(binary)
+            shell = root / "test-shell"
+            shell.write_text(shell.read_text().replace("#!/bin/sh\n", "#!/bin/sh\nexport PATH=" + shlex.quote(str(root)) + ":$PATH\n"))
         (root / "test-shell").chmod(0o700)
         authorized = ["ed25519", "ed25519-encrypted", "rsa", "rsa-encrypted", "ed25519-pkcs8", "ecdsa-pem"]
         (root / "authorized_keys").write_text("".join((root / (name + ".pub")).read_text() for name in authorized))

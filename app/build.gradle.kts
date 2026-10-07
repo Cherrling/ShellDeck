@@ -1,4 +1,5 @@
 import java.util.Properties
+import java.security.MessageDigest
 
 plugins {
     alias(libs.plugins.android.application)
@@ -24,6 +25,9 @@ android {
     namespace = "cc.cherr.shelldeck"
     compileSdk = 36
     buildToolsVersion = "35.0.0"
+    ndkVersion = "29.0.14206865"
+    sourceSets.getByName("main").jniLibs.srcDir(rootProject.layout.buildDirectory.dir("mosh/jniLibs"))
+    sourceSets.getByName("main").assets.srcDir(rootProject.layout.buildDirectory.dir("mosh/assets"))
 
     defaultConfig {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -69,6 +73,7 @@ android {
     sourceSets.getByName("androidTest").assets.srcDir("schemas")
     buildFeatures { compose = true; buildConfig = true }
     packaging {
+        jniLibs.useLegacyPackaging = true
         resources.excludes += setOf("META-INF/versions/9/OSGI-INF/MANIFEST.MF")
         resources.merges += setOf("META-INF/LICENSE.md", "META-INF/NOTICE.md", "META-INF/LICENSE", "META-INF/NOTICE")
     }
@@ -124,3 +129,24 @@ tasks.withType<Test>().configureEach {
     outputs.upToDateWhen { !liveSsh }
     outputs.cacheIf { !liveSsh }
 }
+
+// Native sources are built explicitly so CI can cache the expensive cross-compilation separately.
+val validateMoshNative by tasks.registering {
+    doLast {
+        val root = rootProject.layout.buildDirectory.dir("mosh").get().asFile
+        val digest = MessageDigest.getInstance("SHA-256")
+        for (path in listOf("scripts/build_mosh.py", "native/mosh/sources.json", "native/mosh/pty.c")) {
+            digest.update(rootProject.file(path).readBytes())
+        }
+        val fingerprint = digest.digest().joinToString("") { "%02x".format(it) }
+        check(root.resolve("fingerprint").readText() == fingerprint) { "Mosh sources changed: rerun python3 scripts/build_mosh.py" }
+        val abis = providers.gradleProperty("moshAbis").orElse("arm64-v8a,armeabi-v7a,x86_64").get().split(",")
+        for (abi in abis) for (name in listOf("libmosh-client.so", "libshelldeck-pty.so")) {
+            check(root.resolve("jniLibs/$abi/$name").isFile) {
+                "Missing Mosh native binary ($abi/$name). Run python3 scripts/build_mosh.py first."
+            }
+        }
+        check(root.resolve("assets/terminfo").isDirectory)
+    }
+}
+tasks.matching { it.name == "preBuild" }.configureEach { dependsOn(validateMoshNative) }

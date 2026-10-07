@@ -106,7 +106,14 @@ class ShellDeckModel(application: Application) : AndroidViewModel(application) {
             finally { post { working = false } }
         }
     }
-    fun saveHost(id: String?, label: String, hostname: String, port: String, username: String, identityId: String?, startupCommand: String = "", jumpHostId: String? = null, proxyId: String? = null): Boolean {
+    fun saveHost(id: String?, label: String, hostname: String, port: String, username: String, identityId: String?, startupCommand: String = "", jumpHostId: String? = null, proxyId: String? = null, protocol: String = "ssh", moshPort: String = ""): Boolean {
+        val udp = if (moshPort.isBlank()) 0 else moshPort.toIntOrNull()
+        if (protocol !in setOf("ssh", "mosh") || udp == null || udp !in 0..65535 || (moshPort.isNotBlank() && udp == 0)) {
+            error = "请填写有效的 Mosh UDP 端口（1–65535），或留空自动选择"; return false
+        }
+        if (protocol == "mosh" && (jumpHostId != null || proxyId != null)) {
+            error = "Mosh 暂不支持跳板机或 SOCKS 代理，请改用 SSH 或明确选择直接连接"; return false
+        }
         val number = port.toIntOrNull()
         val host = hostname.trim().removeSurrounding("[", "]").lowercase(Locale.ROOT)
         if (host.isBlank() || host.any { it.isWhitespace() || it == '/' } || number == null || number !in 1..65535 || username.isBlank()) {
@@ -129,6 +136,7 @@ class ShellDeckModel(application: Application) : AndroidViewModel(application) {
                 this.id = id ?: UUID.randomUUID().toString(); this.label = label.trim().ifBlank { host }
                 this.hostname = host; this.port = number; this.username = username.trim(); this.identityId = identityId
                 this.startupCommand = startupCommand; this.jumpHostId = jumpHostId; this.proxyId = proxyId
+                this.protocol = protocol; this.moshPort = udp
             })
         }
         return true
@@ -170,6 +178,7 @@ class ShellDeckModel(application: Application) : AndroidViewModel(application) {
         val original = requireNotNull(dao.host(id))
         dao.saveHost(HostRecord().apply {
             this.id = UUID.randomUUID().toString(); label = "${original.label}（副本）"
+            protocol = original.protocol; moshPort = original.moshPort
             hostname = original.hostname; port = original.port; username = original.username; identityId = original.identityId; startupCommand = original.startupCommand; jumpHostId = original.jumpHostId; proxyId = original.proxyId
         })
     }

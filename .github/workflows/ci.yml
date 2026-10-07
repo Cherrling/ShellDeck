@@ -16,7 +16,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -37,7 +37,7 @@ jobs:
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ${{ env.ANDROID_HOME }}
-          key: android-sdk-${{ runner.os }}-cli15859902-platform36-buildtools35-v2
+          key: android-sdk-${{ runner.os }}-cli15859902-platform36-buildtools35-ndk29-v3
       - name: Set up Android command-line tools
         uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
         with:
@@ -45,7 +45,33 @@ jobs:
           packages: 'platform-tools'
           log-accepted-android-sdk-licenses: false
       - name: Install Android SDK packages
-        run: sdkmanager 'platforms;android-36' 'build-tools;35.0.0' 'platform-tools'
+        run: sdkmanager 'platforms;android-36' 'build-tools;35.0.0' 'platform-tools' 'ndk;29.0.14206865'
+      - name: Restore Mosh native outputs
+        id: mosh-cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            build/mosh/jniLibs
+            build/mosh/assets
+            build/mosh/*.tar.gz
+            build/mosh/fingerprint
+          key: mosh-${{ runner.os }}-ndk29-api26-${{ hashFiles('scripts/build_mosh.py', 'native/mosh/**') }}
+      - name: Build Mosh from pinned sources
+        if: steps.mosh-cache.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build pkg-config ncurses-bin
+          python3 scripts/build_mosh.py
+      - name: Save Mosh native outputs
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && steps.mosh-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            build/mosh/jniLibs
+            build/mosh/assets
+            build/mosh/*.tar.gz
+            build/mosh/fingerprint
+          key: mosh-${{ runner.os }}-ndk29-api26-${{ hashFiles('scripts/build_mosh.py', 'native/mosh/**') }}
       - name: Prepare isolated SSH integration tests
         run: |
           if ! command -v sshd >/dev/null || ! command -v tmux >/dev/null; then
@@ -65,4 +91,4 @@ jobs:
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ${{ env.ANDROID_HOME }}
-          key: android-sdk-${{ runner.os }}-cli15859902-platform36-buildtools35-v2
+          key: android-sdk-${{ runner.os }}-cli15859902-platform36-buildtools35-ndk29-v3

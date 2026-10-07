@@ -26,7 +26,7 @@ jobs:
       source_sha: ${{ steps.source.outputs.sha }}
       build_time: ${{ steps.source.outputs.build_time }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 60
     environment: release
     env:
       RELEASE_TAG: ${{ github.event_name == 'workflow_run' && 'rolling' || github.ref_name }}
@@ -71,7 +71,7 @@ jobs:
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ${{ env.ANDROID_HOME }}
-          key: android-sdk-${{ runner.os }}-cli15859902-platform36-buildtools35-v2
+          key: android-sdk-${{ runner.os }}-cli15859902-platform36-buildtools35-ndk29-v3
       - name: Set up Android command-line tools
         uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
         with:
@@ -79,7 +79,23 @@ jobs:
           packages: 'platform-tools'
           log-accepted-android-sdk-licenses: false
       - name: Install Android SDK packages
-        run: sdkmanager 'platforms;android-36' 'build-tools;35.0.0' 'platform-tools'
+        run: sdkmanager 'platforms;android-36' 'build-tools;35.0.0' 'platform-tools' 'ndk;29.0.14206865'
+      - name: Restore Mosh native outputs
+        id: mosh-cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            build/mosh/jniLibs
+            build/mosh/assets
+            build/mosh/*.tar.gz
+            build/mosh/fingerprint
+          key: mosh-${{ runner.os }}-ndk29-api26-${{ hashFiles('scripts/build_mosh.py', 'native/mosh/**') }}
+      - name: Build Mosh from pinned sources
+        if: steps.mosh-cache.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build pkg-config ncurses-bin
+          python3 scripts/build_mosh.py
       - name: Prepare isolated SSH integration tests
         run: |
           if ! command -v sshd >/dev/null || ! command -v tmux >/dev/null; then
@@ -128,6 +144,7 @@ jobs:
           cp app/build/outputs/apk/release/app-release.apk "dist/ShellDeck-${RELEASE_TAG}-universal.apk"
           git archive --format=tar.gz --prefix="ShellDeck-${RELEASE_TAG}/" \
             --output="dist/ShellDeck-${RELEASE_TAG}-source.tar.gz" HEAD
+          tar -czf "dist/ShellDeck-${RELEASE_TAG}-mosh-sources.tar.gz" -C build/mosh mosh.tar.gz protobuf.tar.gz ncurses.tar.gz openssl.tar.gz
           cd dist
           sha256sum -- *.apk *.tar.gz build-info.json > SHA256SUMS
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -176,13 +193,13 @@ jobs:
           EOF
           if [ "$RELEASE_TAG" = rolling ]; then
             if gh release view rolling >/dev/null 2>"$RUNNER_TEMP/rolling-error"; then
-              gh release upload rolling --clobber ShellDeck-rolling-universal.apk ShellDeck-rolling-source.tar.gz build-info.json SHA256SUMS
+              gh release upload rolling --clobber ShellDeck-rolling-universal.apk ShellDeck-rolling-source.tar.gz ShellDeck-rolling-mosh-sources.tar.gz build-info.json SHA256SUMS
               gh api --method PATCH "repos/$GH_REPO/git/refs/tags/rolling" -f sha="$SOURCE_SHA" -F force=true
               gh release edit rolling --latest --prerelease=false --title "ShellDeck 滚动更新 · $BUILD_TIME" --notes-file "$RUNNER_TEMP/release-notes.md"
             elif grep -Eqi 'release not found|HTTP 404' "$RUNNER_TEMP/rolling-error"; then
               gh release create rolling --target "$SOURCE_SHA" --latest --title "ShellDeck 滚动更新 · $BUILD_TIME" \
                 --notes-file "$RUNNER_TEMP/release-notes.md" \
-                ShellDeck-rolling-universal.apk ShellDeck-rolling-source.tar.gz build-info.json SHA256SUMS
+                ShellDeck-rolling-universal.apk ShellDeck-rolling-source.tar.gz ShellDeck-rolling-mosh-sources.tar.gz build-info.json SHA256SUMS
             else
               cat "$RUNNER_TEMP/rolling-error" >&2
               exit 1
@@ -196,4 +213,4 @@ jobs:
           gh release create "$RELEASE_TAG" --verify-tag --generate-notes --notes-file "$RUNNER_TEMP/release-notes.md" \
             --title "ShellDeck $RELEASE_TAG · $BUILD_TIME" "${options[@]}" \
             "ShellDeck-${RELEASE_TAG}-universal.apk" \
-            "ShellDeck-${RELEASE_TAG}-source.tar.gz" build-info.json SHA256SUMS
+            "ShellDeck-${RELEASE_TAG}-source.tar.gz" "ShellDeck-${RELEASE_TAG}-mosh-sources.tar.gz" build-info.json SHA256SUMS

@@ -10,6 +10,8 @@ public class HostRecord {
     @NonNull public String label = "";
     @NonNull public String hostname = "";
     public int port = 22;
+    @NonNull @ColumnInfo(defaultValue = "'ssh'") public String protocol = "ssh";
+    @ColumnInfo(defaultValue = "0") public int moshPort = 0;
     @NonNull public String username = "";
     @Nullable public String identityId;
     @Nullable public String jumpHostId;

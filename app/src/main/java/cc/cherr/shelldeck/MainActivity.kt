@@ -173,6 +173,16 @@ private fun ShellDeckApp(model: ShellDeckModel, activity: MainActivity) {
                     Text(connection.status, Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
                         style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
+                if (connection.state == cc.cherr.shelldeck.ssh.ConnectionState.MOSH_MISSING) {
+                    cc.cherr.shelldeck.mosh.MoshInstallHelp {
+                        val fallback = HostRecord().apply {
+                            id = connection.host.id; label = connection.host.label; hostname = connection.host.hostname
+                            port = connection.host.port; username = connection.host.username; identityId = connection.host.identityId
+                            // Installation shell intentionally omits any automatic startup command.
+                        }
+                        if (fallback.identityId == null) login = fallback else model.connect(fallback, "")
+                    }
+                }
                 key(terminal) {
                     AndroidView(factory = terminal::createView, modifier = Modifier.weight(1f).fillMaxWidth(),
                         onRelease = terminal::releaseView, update = {})
@@ -237,8 +247,8 @@ private fun ShellDeckApp(model: ShellDeckModel, activity: MainActivity) {
                                         Icon(painterResource(R.drawable.ic_more_vert), "${session.host.label} 的会话工具")
                                     }
                                     DropdownMenu(sessionMenu, onDismissRequest = { sessionMenu = false }) {
-                                        DropdownMenuItem(text = { Text("浏览文件") }, onClick = { sessionMenu = false; filesSession = session.id })
-                                        DropdownMenuItem(text = { Text("端口转发") }, onClick = { sessionMenu = false; tunnelSession = session.id })
+                                        DropdownMenuItem(enabled = session.host.protocol == "ssh", text = { Text(if (session.host.protocol == "mosh") "浏览文件（仅 SSH）" else "浏览文件") }, onClick = { sessionMenu = false; filesSession = session.id })
+                                        DropdownMenuItem(enabled = session.host.protocol == "ssh", text = { Text(if (session.host.protocol == "mosh") "端口转发（仅 SSH）" else "端口转发") }, onClick = { sessionMenu = false; tunnelSession = session.id })
                                         DropdownMenuItem(text = { Text("Prompt 编辑器") }, onClick = {
                                             sessionMenu = false; manager.select(session.id); session.terminal.promptVisible = true
                                         })
@@ -327,8 +337,8 @@ private fun ShellDeckApp(model: ShellDeckModel, activity: MainActivity) {
         cc.cherr.shelldeck.terminal.PasteDialog(it)
         cc.cherr.shelldeck.terminal.PromptEditor(it)
     }
-    if (hostEditor) HostEditor(editing, model.identities, model.hosts, model.proxies, onDismiss = { hostEditor = false }) { label, hostname, port, username, identity, startup, jump, proxy ->
-        if (model.saveHost(editing?.id, label, hostname, port, username, identity, startup, jump, proxy)) hostEditor = false
+    if (hostEditor) HostEditor(editing, model.identities, model.hosts, model.proxies, onDismiss = { hostEditor = false }) { label, hostname, port, username, identity, startup, jump, proxy, protocol, udp ->
+        if (model.saveHost(editing?.id, label, hostname, port, username, identity, startup, jump, proxy, protocol, udp)) hostEditor = false
     }
     if (addingIdentity) AlertDialog(onDismissRequest = { addingIdentity = false }, title = { Text("添加 SSH Key") },
         text = { Column {
@@ -394,7 +404,7 @@ private fun ConfirmDialog(title: String, message: String, dismiss: () -> Unit, c
 
 @Composable
 private fun HostEditor(host: HostRecord?, identities: List<IdentityRecord>, hosts: List<HostRecord>, proxies: List<cc.cherr.shelldeck.data.ProxyRecord>, onDismiss: () -> Unit,
-    save: (String, String, String, String, String?, String, String?, String?) -> Unit) {
+    save: (String, String, String, String, String?, String, String?, String?, String, String) -> Unit) {
     var label by remember { mutableStateOf(host?.label ?: "") }
     var hostname by remember { mutableStateOf(host?.hostname ?: "") }
     var port by remember { mutableStateOf(host?.port?.toString() ?: "22") }
@@ -402,12 +412,24 @@ private fun HostEditor(host: HostRecord?, identities: List<IdentityRecord>, host
     var proxy by remember { mutableStateOf(host?.proxyId) }
     var jump by remember { mutableStateOf(host?.jumpHostId) }
     var startup by remember { mutableStateOf(host?.startupCommand ?: "") }
+    var protocol by remember { mutableStateOf(host?.protocol ?: "ssh") }
+    var udp by remember { mutableStateOf(host?.moshPort?.takeIf { it > 0 }?.toString() ?: "") }
     var identity by remember { mutableStateOf(if (host != null) host.identityId else identities.firstOrNull()?.id) }
     AlertDialog(onDismissRequest = onDismiss, title = { Text(if (host == null) "添加服务器" else "编辑服务器") },
         text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedTextField(label, { label = it }, label = { Text("名称") }, singleLine = true)
             OutlinedTextField(hostname, { hostname = it }, label = { Text("主机名 / IP") }, singleLine = true)
-            OutlinedTextField(port, { port = it }, label = { Text("端口") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+            OutlinedTextField(port, { port = it }, label = { Text("SSH 端口") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(protocol == "ssh", { protocol = "ssh" }, label = { Text("SSH") })
+                FilterChip(protocol == "mosh", { protocol = "mosh" }, label = { Text("Mosh") })
+            }
+            if (protocol == "mosh") {
+                Text("需要远端安装 mosh；手机须能直接访问服务器 UDP。暂不支持跳板机、SOCKS、SFTP 和端口转发。", style = MaterialTheme.typography.bodySmall)
+                OutlinedTextField(udp, { udp = it }, label = { Text("Mosh UDP 端口（可留空）") }, singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    supportingText = { Text("留空由服务器在 60000–61000 中选择") })
+            }
             OutlinedTextField(username, { username = it }, label = { Text("用户名") }, singleLine = true)
             OutlinedTextField(startup, { startup = it }, label = { Text("启动命令（可留空）") }, singleLine = true,
                 supportingText = { Text("每次新建连接时执行一次，例如 tmux new-session -A -s codex") })
@@ -444,7 +466,7 @@ private fun HostEditor(host: HostRecord?, identities: List<IdentityRecord>, host
                 Row { RadioButton(selected = identity == option.id, onClick = { identity = option.id }); TextButton(onClick = { identity = option.id }) { Text(option.label) } }
             }
             Row { RadioButton(selected = identity == null, onClick = { identity = null }); TextButton(onClick = { identity = null }) { Text("密码登录") } }
-        } }, confirmButton = { TextButton(onClick = { save(label, hostname, port, username, identity, startup, jump, proxy) }) { Text("保存") } },
+        } }, confirmButton = { TextButton(onClick = { save(label, hostname, port, username, identity, startup, jump, proxy, protocol, udp) }) { Text("保存") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } })
 }
 

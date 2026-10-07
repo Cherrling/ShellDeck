@@ -64,8 +64,8 @@ class BackupRepository(
                     val match = snapshot.second.find { it.id == host.id }
                         ?: snapshot.second.filter { it.hostname == host.hostname && it.port == host.port && it.username == host.username }.singleOrNull()
                         ?: snapshot.second.filter { it.label == host.label }.singleOrNull()
-                    RestoreEntry(host.id, host.label, "${host.username}@${host.hostname}:${host.port}\n启动命令：${host.startupCommand.ifBlank { "无" }}", match?.id, match?.label,
-                        match?.let { "${it.username}@${it.hostname}:${it.port}\n启动命令：${it.startupCommand.ifBlank { "无" }}" })
+                    RestoreEntry(host.id, host.label, "${host.username}@${host.hostname}:${host.port}\n协议：${host.protocol} · Mosh UDP：${host.moshPort.takeIf { it > 0 } ?: "自动"}\n启动命令：${host.startupCommand.ifBlank { "无" }}", match?.id, match?.label,
+                        match?.let { "${it.username}@${it.hostname}:${it.port}\n协议：${it.protocol} · Mosh UDP：${it.moshPort.takeIf { it > 0 } ?: "自动"}\n启动命令：${it.startupCommand.ifBlank { "无" }}" })
                 }
                 val proxyEntries = proxies.map { proxy ->
                     val match = snapshot.third.find { it.id == proxy.id }
@@ -132,6 +132,7 @@ class BackupRepository(
                         this.id = id; label = copyLabel(source.label, entry, choice); hostname = source.hostname
                         port = source.port; username = source.username; identityId = source.identityId?.let { identityMap.getValue(it) }
                         proxyId = source.proxyId?.let { proxyMap.getValue(it) }
+                        protocol = source.protocol; moshPort = source.moshPort
                         jumpHostId = source.jumpHostId?.let { hostMap.getValue(it) }; startupCommand = source.startupCommand; favorite = source.favorite; lastUsedAt = source.lastUsedAt
                     }); hostCount++
                 }
@@ -169,7 +170,7 @@ class BackupRepository(
         val before = b.associateBy { it.id }
         return a.size == b.size && a.all { x -> before[x.id]?.let { y ->
             x.label == y.label && x.hostname == y.hostname && x.port == y.port && x.username == y.username &&
-                x.proxyId == y.proxyId && x.jumpHostId == y.jumpHostId && x.identityId == y.identityId && x.startupCommand == y.startupCommand && x.favorite == y.favorite && x.lastUsedAt == y.lastUsedAt
+                x.protocol == y.protocol && x.moshPort == y.moshPort && x.proxyId == y.proxyId && x.jumpHostId == y.jumpHostId && x.identityId == y.identityId && x.startupCommand == y.startupCommand && x.favorite == y.favorite && x.lastUsedAt == y.lastUsedAt
         } == true }
     }
 }

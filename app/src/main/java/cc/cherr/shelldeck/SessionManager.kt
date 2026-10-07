@@ -46,7 +46,7 @@ class SessionConnection(application: Application, val host: HostRecord, dao: Sto
     var ended by mutableStateOf(false); private set
     var state by mutableStateOf(ConnectionState.PREPARING); private set
     val status get() = state.message
-    val connected get() = state == ConnectionState.CONNECTED && !ended
+    val connected get() = state in setOf(ConnectionState.CONNECTED, ConnectionState.MOSH_ACTIVE) && !ended
     var challenge by mutableStateOf<HostChallenge?>(null); private set
     var requestingPassword by mutableStateOf(false); private set
     var passphraseIdentity by mutableStateOf<String?>(null); private set
@@ -54,9 +54,9 @@ class SessionConnection(application: Application, val host: HostRecord, dao: Sto
     private var pendingPassphrase: CompletableFuture<CharArray?>? = null
     private val password = secret.toCharArray()
     val terminal = TerminalController(application) { finish() }
-    private lateinit var transport: SshTransport
-    val tunnels by lazy { TunnelController { local, host, port -> transport.openTunnel(local, host, port) } }
-    val files by lazy { cc.cherr.shelldeck.sftp.SftpController(application) { transport.openSftp() } }
+    private lateinit var transport: com.termux.terminal.TerminalTransport
+    val tunnels by lazy { TunnelController { local, host, port -> (transport as SshTransport).openTunnel(local, host, port) } }
+    val files by lazy { cc.cherr.shelldeck.sftp.SftpController(application) { (transport as SshTransport).openSftp() } }
     init {
         fun hop(endpoint: HostRecord): SshHop {
         val verifier = HostTrust(endpoint.hostname, endpoint.port,
@@ -98,12 +98,19 @@ class SessionConnection(application: Application, val host: HostRecord, dao: Sto
                 } finally { if (endpoint.id == host.id) password.fill('\u0000') }
             })
         }
-        transport = SshTransport(host.hostname, host.port, host.username,
-            object : net.schmizz.sshj.transport.verification.HostKeyVerifier {
-                override fun verify(h: String, p: Int, key: java.security.PublicKey) = false
-                override fun findExistingAlgorithms(h: String, p: Int): List<String> = emptyList()
-            }, {},
-            status = { value -> main.post { if (!disposed && !ended && !state.terminal) state = value } },
+        val reject = object : net.schmizz.sshj.transport.verification.HostKeyVerifier {
+            override fun verify(h: String, p: Int, key: java.security.PublicKey) = false
+            override fun findExistingAlgorithms(h: String, p: Int): List<String> = emptyList()
+        }
+        val update: (ConnectionState) -> Unit = { value -> main.post { if (!disposed && !ended && !state.terminal) state = value } }
+        transport = if (host.protocol == "mosh") {
+            cc.cherr.shelldeck.mosh.MoshTransport(application, host,
+                SshConnector(host.hostname, host.port, reject, {}, update,
+                    route = { listOf(hop(host)) }, keepAliveSeconds = 0), update)
+        } else {
+            SshTransport(host.hostname, host.port, host.username,
+            reject, {},
+            status = update,
             startupCommand = host.startupCommand,
             route = { jumpRoute(host, dao::host).map(::hop) },
             connectFirst = host.proxyId?.let { proxyId -> { socket, target, port ->
@@ -113,6 +120,7 @@ class SessionConnection(application: Application, val host: HostRecord, dao: Sto
                 }
             } },
             keepAliveSeconds = cc.cherr.shelldeck.settings.SettingsStore(application).read().keepAliveSeconds)
+        }
         terminal.session = TerminalSession(transport, 5000, terminal)
         // Start independently of composition; a quick navigation must not leave an unstarted connection.
         terminal.session.updateSize(80, 24, 8, 16)

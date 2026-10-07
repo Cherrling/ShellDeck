@@ -4,6 +4,7 @@
 
 安装入口统一为 [滚动更新 Release](https://github.com/Cherrling/ShellDeck/releases/tag/rolling)：只分发正式签名的 `cc.cherr.shelldeck` APK，沿用原签名并递增 versionCode，可直接覆盖更新。main 的 CI 通过后自动更新该入口。
 
+- 主机可选基础直连 Mosh：复用 SSH 密钥/密码与指纹验证，再通过 UDP 保持终端；远端缺少 mosh-server 时仅显示安装指引，不自动安装。首版不组合跳板机/SOCKS，也不提供 Mosh 会话的 SFTP/端口转发。OSC 兼容限制与验证范围见 [Mosh 设计](docs/research/mosh.md)。
 - 主界面为服务器、会话、设置三个底部页面。点击主机卡片连接，编辑/复制/删除在卡片菜单；密钥管理放在设置中的 SSH 身份与密钥。终端返回先收键盘，再回会话页并保持连接。
 - 终端支持 HTTP/HTTPS 地址和 OSC 8 超链接，点击后查看真实地址、复制或确认打开；启用鼠标的 TUI 用长按查看链接。不会后台扫描或抓取网页。
 - 终端支持长按选区复制；多行或长文本粘贴先预览确认，保留 bracketed paste。Ctrl+Shift+V、鼠标中键和输入法粘贴统一处理；超大内容建议使用文件上传。
@@ -13,7 +14,7 @@
 - 两行快捷键整体横向滑动；编辑器支持长按拖拽排序、跨行移动和边缘自动滚动，点击按键编辑内容。可调行高及每行显示数量，默认单行 38 dp、显示 7 个标准宽度按键，文字 12 sp；超出的整体横向滑动。Shift / Ctrl / Alt 支持一次性、按住及长按锁定，切换会话清理状态。
 - 主机支持名称、地址、用户名及端口搜索，兼容中文和缩写；提供全部 / 收藏 / 最近筛选。默认收藏置前，同组按最近使用排列；最近记录的是主动发起连接的时间，失败尝试也计入。编辑保留收藏和使用记录，复制共用原 Identity，副本不继承收藏和历史。
 - 会话列表第一行显示主机名和递增数字编号，第二行显示远端终端标题或连接状态。按开启顺序排列；点击卡片进入，右侧 × 确认关闭。标题展示采用事件驱动的 500ms 合并更新，隐藏卡片取消订阅，无空闲轮询；终端正文持续解析，View 刷新另按界面可见性调度。
-- 断线后仅保留旧终端内容供查看，不提供手动重连入口。需要继续操作时，由用户回服务器页面新建连接，旧会话保持独立。连接尚未就绪时重复点击会选中已有尝试；已连接后允许另开会话。
+- SSH 断线后仅保留旧终端内容供查看，不提供手动重连入口。需要继续操作时，由用户回服务器页面新建连接，旧会话保持独立。连接尚未就绪时重复点击会选中已有尝试；已连接后允许另开会话。
 - 内置 Maple Mono NF CN Regular，支持系统字体和导入 TTF / OTF、重命名、删除、字号及预览。终端内可用音量 ＋ / − 调整字号。
 - 正常连接时隐藏独立标题栏，快捷键占满整行，右下角不再放管理按钮。系统栏图标跟随实际页面/终端背景，深色终端使用浅色图标。
 - App 支持跟随系统/明亮/深色与动态配色；终端独立编辑 ANSI 16 色、前景、背景、光标和选区颜色，提供真实终端预览、JSON 导入导出和常见 Termux colors.properties 导入。保存后应用到现有与新建会话，自定义配色随加密备份保存。
@@ -37,16 +38,17 @@ ESC   /     -    PGUP   ↑   PGDN  SHIFT
 TAB  CTRL  ALT    ←     ↓    →    键盘
 ```
 
-数据库版本 5 增加 SOCKS 代理和主机代理引用；支持版本 1 / 2 / 3 / 4 非破坏性升级，保留身份密文、主机引用、收藏、最近使用和服务器指纹。按照 [Room 迁移说明](https://developer.android.com/training/data-storage/room/migrating-db-versions) 保留历史 schema 并验证旧库迁移，不使用破坏性重建。
+数据库版本 6 增加主机协议和 Mosh UDP 端口；支持版本 1 / 2 / 3 / 4 / 5 非破坏性升级，保留身份密文、主机引用、收藏、最近使用和服务器指纹。按照 [Room 迁移说明](https://developer.android.com/training/data-storage/room/migrating-db-versions) 保留历史 schema 并验证旧库迁移，不使用破坏性重建。
 
 ## 开发环境
 
 - Android 8.0+（minSdk 26）。正式包名 `cc.cherr.shelldeck`；开发包名 `cc.cherr.shelldeck.debug`。
 - JDK 17、Gradle 8.13（仓库附带 Wrapper）、AGP 8.13.2、Kotlin 2.2.21。
-- Android SDK Platform 36、Build Tools 35.0.0；当前不需要 NDK。
+- Android SDK Platform 36、Build Tools 35.0.0、NDK 29.0.14206865；原生构建依赖见 [Mosh 构建说明](docs/research/mosh.md)。
 - 设置 `ANDROID_HOME`，或在未跟踪的 `local.properties` 中设置 `sdk.dir`。
 
 ```sh
+python3 scripts/build_mosh.py
 python3 scripts/ssh_test_server.py -- ./gradlew :app:lintDebug :app:testDebugUnitTest :terminal-emulator:testDebugUnitTest :app:assembleDebug
 python3 -m unittest discover -s scripts -p 'test_*.py'
 ```
@@ -69,6 +71,7 @@ APK 在 `app/build/outputs/apk/debug/app-debug.apk`。测试命令需要本机 O
 - main CI 成功：Release 工作流检出已验证的精确提交，构建并验签，更新固定 rolling Release、源码包及校验文件。旧提交重跑不会覆盖更新的 main。
 - push `v*` tag：检查版本与来源，测试、lint、签名构建、验签，发布 GitHub Release。
 - GitHub 仓库：[Cherrling/ShellDeck](https://github.com/Cherrling/ShellDeck)。后续正式发布使用已配置的固定签名 Secrets。详见 [发布说明](docs/development/releases.md)。
+- [基础 Mosh 本地验证](docs/development/mosh-validation.md)。
 - [后台会话与通知](docs/development/background-connections.md)。
 - [Rolling code 15 SFTP 目录导航验证](docs/development/rolling-code15-validation.md)。
 - [Rolling code 14 输入、文件和 SSH 网络能力](docs/development/rolling-code14-validation.md)。

@@ -110,3 +110,7 @@ python3 scripts/configure_signing.py \
 ## 构建追踪
 
 Release 工作流在校验源码时生成一次 `YYYY-MM-DD HH:mm:ss UTC+8`，通过 SHELLDECK_BUILD_TIME 和 SHELLDECK_SOURCE_REVISION 写入 APK。设置页显示版本号、版本码、同一 UTC+8 时间和提交短 SHA。发布标题及说明带时间戳，附件 build-info.json 保存完整版本/时间/提交，并受 SHA256SUMS 校验。APK 和源码包文件名继续固定，下载链接不变。未指定这些环境变量的本地构建明确显示未记录时间/local，不冒充正式 CI 构建。
+
+## Mosh 原生产物
+
+构建 APK 前运行 `python3 scripts/build_mosh.py`，固定 NDK r29。CI/Release 共享按原生源码指纹生成的产物缓存。正式发布附带 `ShellDeck-<tag>-mosh-sources.tar.gz`，包含实际使用的 Mosh/protobuf/ncurses/OpenSSL 原始源码；与应用源码包一起提供完整构建来源。原生库及依赖许可证随 APK 分发，细节见 `docs/research/mosh.md`。

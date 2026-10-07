@@ -5,16 +5,12 @@ import com.termux.terminal.TerminalTransport
 import net.schmizz.sshj.SSHClient
 import net.schmizz.sshj.connection.channel.direct.Session
 import net.schmizz.sshj.transport.verification.HostKeyVerifier
-import java.net.InetAddress
 import java.net.Socket
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.Executors
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
-import javax.net.SocketFactory
-
-data class SshHop(val hostname: String, val port: Int, val verify: HostKeyVerifier, val authenticate: (SSHClient) -> Unit)
 
 /** A single producer feeds the emulator; writes/resizes are serialized independently of reads. */
 class SshTransport(
@@ -36,8 +32,7 @@ class SshTransport(
     private var writing = false
     private val reader = Executors.newSingleThreadExecutor()
     private val writer = ThreadPoolExecutor(1, 1, 0, TimeUnit.MILLISECONDS, ArrayBlockingQueue(256))
-    private val socket = Socket()
-    private val clients = java.util.concurrent.ConcurrentLinkedDeque<SSHClient>()
+    private val connector = SshConnector(hostname, port, verify, authenticate, status, route, keepAliveSeconds, connectFirst)
     private val client = java.util.concurrent.atomic.AtomicReference<SSHClient?>()
     @Volatile private var shell: Session.Shell? = null
     private var listener: TerminalTransport.Listener? = null
@@ -46,46 +41,7 @@ class SshTransport(
         reader.execute {
             var result = 1
             try {
-                check(!closed.get())
-                SshKeys.configure()
-                val hops = route?.invoke() ?: listOf(SshHop(hostname, port, verify, authenticate))
-                require(hops.isNotEmpty() && hops.size <= 5)
-                require(keepAliveSeconds == 0 || keepAliveSeconds in 30..600)
-                var previous: SSHClient? = null
-                hops.forEach { hop ->
-                    check(!closed.get())
-                    val config = net.schmizz.sshj.DefaultConfig().apply {
-                        keepAliveProvider = net.schmizz.keepalive.KeepAliveProvider.KEEP_ALIVE
-                    }
-                    val current = SSHClient(config)
-                    clients.addFirst(current)
-                    check(!closed.get())
-                    if (previous == null) current.socketFactory = object : SocketFactory() {
-                        override fun createSocket(): Socket = socket
-                        override fun createSocket(h: String, p: Int): Socket = error("Unused")
-                        override fun createSocket(h: String, p: Int, l: InetAddress, lp: Int): Socket = error("Unused")
-                        override fun createSocket(h: InetAddress, p: Int): Socket = error("Unused")
-                        override fun createSocket(h: InetAddress, p: Int, l: InetAddress, lp: Int): Socket = error("Unused")
-                    }
-                    current.connection.keepAlive.keepAliveInterval = keepAliveSeconds
-                    (current.connection.keepAlive as net.schmizz.keepalive.KeepAliveRunner).maxAliveCount = 3
-                    current.connectTimeout = 15_000
-                    current.transport.timeoutMs = 120_000
-                    current.addHostKeyVerifier(hop.verify)
-                    status(ConnectionState.CONNECTING)
-                    if (previous == null) {
-                        connectFirst?.invoke(socket, hop.hostname, hop.port)
-                        current.connect(hop.hostname, hop.port)
-                    }
-                    else current.connectVia(previous!!.newDirectConnection(hop.hostname, hop.port))
-                    check(!closed.get())
-                    current.transport.timeoutMs = 20_000
-                    status(ConnectionState.AUTHENTICATING)
-                    hop.authenticate(current)
-                    check(!closed.get())
-                    previous = current
-                }
-                val ssh = requireNotNull(previous)
+                val ssh = connector.connect()
                 client.set(ssh)
                 check(!closed.get())
                 val channel = ssh.startSession()
@@ -111,19 +67,7 @@ class SshTransport(
                 result = 0
                 if (!closed.get()) status(ConnectionState.ENDED)
             } catch (failure: Exception) {
-                if (!closed.get()) status(when (failure) {
-                    is cc.cherr.shelldeck.proxy.ProxyFailure -> when (failure.kind) {
-                        cc.cherr.shelldeck.proxy.ProxyFailure.Kind.AUTH -> ConnectionState.PROXY_AUTH_FAILED
-                        cc.cherr.shelldeck.proxy.ProxyFailure.Kind.TIMEOUT -> ConnectionState.PROXY_TIMEOUT
-                        cc.cherr.shelldeck.proxy.ProxyFailure.Kind.REJECTED -> ConnectionState.PROXY_REJECTED
-                        else -> ConnectionState.PROXY_FAILED
-                    }
-                    is net.schmizz.sshj.userauth.UserAuthException -> ConnectionState.AUTH_FAILED
-                    is java.net.UnknownHostException -> ConnectionState.ADDRESS_FAILED
-                    is java.net.ConnectException -> ConnectionState.CONNECT_FAILED
-                    is java.net.SocketTimeoutException -> ConnectionState.TIMEOUT
-                    else -> ConnectionState.FAILED
-                })
+                if (!closed.get()) status(connectionFailure(failure))
             } finally {
                 try { listener.onClosed(result) } finally {
                     close()
@@ -183,16 +127,12 @@ class SshTransport(
     private fun closeClient() {
         // Ownership is transferred once; UI cancellation and reader completion may race.
         client.set(null)
-        while (true) {
-            val owned = clients.pollFirst() ?: break
-            try { owned.close() } catch (_: Exception) { }
-        }
+        connector.close()
     }
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
         // No network wait on the UI thread. Close the owned socket before SSHJ channel cleanup.
         Thread({
-            try { socket.close() } catch (_: Exception) { }
             closeClient()
         }, "ssh-close").start()
         synchronized(outputLock) { pendingOutput.forEach { it.fill(0) }; pendingOutput.clear() }
