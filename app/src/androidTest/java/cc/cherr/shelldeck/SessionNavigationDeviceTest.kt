@@ -86,6 +86,7 @@ class SessionNavigationDeviceTest {
             ui.runOnIdle { assertTrue(connection.terminal.session.isReady) }
             ui.onNodeWithText("设置", substring = false).performClick()
             ui.runOnIdle { assertNull(ui.activity.onTerminalFontSizeChange) }
+            ui.onNodeWithText("字体与字号").performClick()
             ui.onNodeWithText("字号：14 sp").performScrollTo().assertIsDisplayed()
             androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
             ui.onNodeWithTag("page-SESSIONS").performClick()

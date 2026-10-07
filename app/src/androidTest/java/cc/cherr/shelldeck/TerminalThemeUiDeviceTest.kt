@@ -19,6 +19,7 @@ class TerminalThemeUiDeviceTest {
         try {
             ui.runOnUiThread { model.updateSettings(original.copy(terminalTheme = null)) }
             ui.onNodeWithTag("page-SETTINGS").performClick()
+            ui.onNodeWithText("终端配色", substring = false).performClick()
             ui.onNodeWithText("编辑终端配色").performScrollTo().performClick()
             ui.onNodeWithTag("theme-color-1").performScrollTo().performClick()
             ui.onNodeWithText("RGB 十六进制").performTextReplacement("#123ABC")
@@ -42,7 +43,8 @@ class TerminalThemeUiDeviceTest {
             InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
             ui.onNodeWithText("放弃", substring = false).performClick()
             ui.runOnIdle { assertEquals(TerminalTheme.parse("#123ABC"), model.settings.terminalTheme!!.colors[1]) }
-            ui.onNodeWithText("关于 ShellDeck").performScrollTo().assertIsDisplayed()
+            androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+            ui.onNodeWithText("关于 ShellDeck").performScrollTo().performClick()
             ui.onNodeWithText("版本 ${BuildConfig.VERSION_NAME}（${BuildConfig.VERSION_CODE}）").performScrollTo().assertIsDisplayed()
             ui.onNodeWithText("提交：${BuildConfig.SOURCE_REVISION}").performScrollTo().assertIsDisplayed()
         } finally { ui.runOnUiThread { model.updateSettings(original) } }

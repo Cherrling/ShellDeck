@@ -18,7 +18,6 @@ import kotlin.math.roundToInt
 @Composable
 internal fun KeyboardSizeSettings(profile: KeyboardProfile, saved: KeyboardSizing, save: (KeyboardSizing) -> Unit) {
     var size by remember(saved) { mutableStateOf(saved) }
-    Text("快捷键大小", style = MaterialTheme.typography.titleMedium)
     Text("行高：${size.rowHeight} dp")
     Slider(size.rowHeight.toFloat(), { size = size.copy(rowHeight = it.roundToInt()) }, valueRange = 28f..56f, steps = 27,
         onValueChangeFinished = { save(size) }, modifier = Modifier.testTag("key-height-slider"))

@@ -30,10 +30,14 @@ class MainNavigationDeviceTest {
             ui.onNodeWithText("取消", substring = false).performClick()
             ui.onNodeWithTag("page-SETTINGS").assertIsSelected()
             androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+            ui.onNodeWithText("应用外观").performClick()
+            ui.onNodeWithText("夜间模式").performClick()
             ui.onNodeWithText("深色", substring = false).performClick()
             ui.runOnIdle { assertFalse(WindowCompat.getInsetsController(ui.activity.window, ui.activity.window.decorView).isAppearanceLightStatusBars) }
             ui.activityRule.scenario.recreate()
             ui.runOnIdle { assertEquals(ThemeMode.DARK, model.settings.theme); assertFalse(WindowCompat.getInsetsController(ui.activity.window, ui.activity.window.decorView).isAppearanceLightStatusBars) }
+            androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+            ui.onNodeWithText("快捷键", substring = false).performClick()
             ui.onNodeWithText("编辑快捷键布局").performScrollTo().performClick()
             ui.onNodeWithTag("main-navigation").assertDoesNotExist()
             androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
