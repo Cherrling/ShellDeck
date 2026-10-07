@@ -49,6 +49,12 @@ class JumpTunnelIntegrationTest {
                 } }.apply { start() }
                 val tunnel = transport.openTunnel(0, "127.0.0.1", server.localPort)
                 val local = tunnel.port
+                // Inspect the owned listener, not a newly bound socket: a released port can
+                // still be in TIME_WAIT or be allocated to an unrelated connection.
+                val listener = LocalTunnel::class.java.getDeclaredField("listener").let { field ->
+                    field.isAccessible = true
+                    field.get(tunnel) as ServerSocket
+                }
                 try {
                     Socket("127.0.0.1", local).use { socket ->
                         socket.soTimeout = 10000
@@ -57,12 +63,7 @@ class JumpTunnelIntegrationTest {
                     }
                 } finally { tunnel.close() }
                 worker.join(10000); assertFalse(worker.isAlive)
-                // A connect to a released ephemeral port can hit a reused port. Rebinding checks
-                // that our listening socket released ownership, without assuming the port stays unused.
-                ServerSocket().use { probe ->
-                    probe.reuseAddress = true
-                    probe.bind(java.net.InetSocketAddress("127.0.0.1", local))
-                }
+                assertTrue("tunnel releases its listening socket", listener.isClosed)
             }
             ServerSocket(0, 1, java.net.InetAddress.getByName("127.0.0.1")).use { server ->
                 val accepted = CountDownLatch(1)
