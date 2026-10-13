@@ -22,6 +22,11 @@ class ReleaseValidationTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 validate_font_packaging(apk, "lite")
             with zipfile.ZipFile(apk, "w") as archive:
+                archive.write(ROOT / "app/src/bundled/res/font/maple_mono_nf_cn_regular.ttf", "res/ES.ttf")
+            validate_font_packaging(apk, "bundled")
+            with self.assertRaises(ValueError):
+                validate_font_packaging(apk, "lite")
+            with zipfile.ZipFile(apk, "w") as archive:
                 archive.writestr("res/font/maple_mono_nf_cn_regular.ttf", b"wrong font")
             with self.assertRaises(ValueError):
                 validate_font_packaging(apk, "bundled")

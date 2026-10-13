@@ -65,15 +65,15 @@ def validate_font_packaging(apk: Path, edition: str) -> None:
     with zipfile.ZipFile(apk) as archive:
         fonts = sorted(name for name in archive.namelist()
                        if Path(name).suffix.lower() in {".ttf", ".otf", ".ttc", ".woff", ".woff2"})
-        expected = "res/font/maple_mono_nf_cn_regular.ttf"
         if edition == "lite":
             if fonts:
                 raise ValueError(f"Lite APK must not contain fonts: {fonts}")
         elif edition == "bundled":
-            if fonts != [expected]:
+            # Release resource optimization may shorten paths (for example res/ES.ttf).
+            if len(fonts) != 1:
                 raise ValueError(f"Bundled APK must contain Maple Mono only: {fonts}")
             source = ROOT / "app/src/bundled/res/font/maple_mono_nf_cn_regular.ttf"
-            if archive.read(expected) != source.read_bytes():
+            if archive.read(fonts[0]) != source.read_bytes():
                 raise ValueError("Bundled font differs from source")
         else:
             raise ValueError("Unknown font edition")
