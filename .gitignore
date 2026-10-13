@@ -13,3 +13,6 @@ keystore.properties
 __pycache__/
 dist/
 .DS_Store
+
+# Font-free edition build output
+/app/build-lite/

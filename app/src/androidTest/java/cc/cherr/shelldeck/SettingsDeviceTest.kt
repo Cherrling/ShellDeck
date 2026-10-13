@@ -40,8 +40,25 @@ class SettingsDeviceTest {
             assertEquals(customized, store.read().keyboard)
         } finally { store.save(original) }
     }
+    @Test fun switchingEditionResolvesBuiltInFontWithoutLosingImportedSelection() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val prefs = context.getSharedPreferences("font-edition-test", android.content.Context.MODE_PRIVATE)
+        val store = SettingsStore(context, "font-edition-test")
+        try {
+            store.save(AppSettings(fontId = "maple"))
+            val hasMaple = FontStore(context).entries().any { it.id == "maple" }
+            assertEquals(if (hasMaple) "maple" else "system", store.read().fontId)
+            store.save(AppSettings(fontId = "imported-font-id"))
+            assertEquals("imported-font-id", store.read().fontId)
+        } finally { prefs.edit { clear() } }
+    }
     @Test fun bundledFontLoadsOnceAndHasAsciiAndChineseGlyphs() {
         val store = FontStore(InstrumentationRegistry.getInstrumentation().targetContext)
+        if (store.entries().none { it.id == "maple" }) {
+            assertSame(android.graphics.Typeface.MONOSPACE, store.load("maple"))
+            assertEquals("system", AppSettings().fontId)
+            return
+        }
         val face = store.load("maple")
         assertSame(face, store.load("maple"))
         val paint = android.graphics.Paint().apply { typeface = face; textSize = 32f }

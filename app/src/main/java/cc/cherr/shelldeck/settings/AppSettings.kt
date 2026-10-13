@@ -11,14 +11,16 @@ enum class BackgroundMode { OFF, NORMAL, ONGOING }
 enum class ThemeMode { SYSTEM, LIGHT, DARK }
 enum class TerminalPalette { DARK, LIGHT }
 data class AppSettings(val theme: ThemeMode = ThemeMode.SYSTEM, val dynamicColor: Boolean = true,
-    val fontId: String = "maple", val fontSize: Int = 14, val palette: TerminalPalette = TerminalPalette.DARK,
+    val fontId: String = BundledFont.defaultId, val fontSize: Int = 14, val palette: TerminalPalette = TerminalPalette.DARK,
     val keyboard: KeyboardProfile = KeyboardProfile.default(), val keyboardSizing: KeyboardSizing = KeyboardSizing(),
     val backgroundMode: BackgroundMode = BackgroundMode.NORMAL, val terminalTheme: TerminalTheme? = null, val keepAliveSeconds: Int = 60)
 
 /** Non-secret preferences only. SSH credentials never enter this store. */
 class SettingsStore(context: Context, name: String = "appearance_and_keyboard") {
     private val prefs = context.getSharedPreferences(name, Context.MODE_PRIVATE)
-    fun read(): AppSettings = try { decode(prefs.getString("settings", "{}")!!, strict = false) } catch (_: Exception) { AppSettings() }
+    fun read(): AppSettings = try { decode(prefs.getString("settings", "{}")!!, strict = false).let {
+        if (it.fontId == "maple" && BundledFont.entries.isEmpty()) it.copy(fontId = "system") else it
+    } } catch (_: Exception) { AppSettings() }
     fun save(settings: AppSettings) { prefs.edit { putString("settings", encode(settings)) } }
     @android.annotation.SuppressLint("UseKtx") // KTX edit returns Unit; restore must inspect the disk commit result.
     fun saveRestored(settings: AppSettings): Boolean = prefs.edit().putString("settings", encode(settings)).commit()
@@ -49,7 +51,7 @@ class SettingsStore(context: Context, name: String = "appearance_and_keyboard") 
                 require(sizing.get("height") is Int && sizing.get("visibleKeys") is Int)
             }
             return AppSettings(ThemeMode.valueOf(root.optString("theme", "SYSTEM")), root.optBoolean("dynamic", true),
-                root.optString("font", "maple"), root.optInt("size", 14).let { if (strict) it else it.coerceIn(8, 32) },
+                root.optString("font", BundledFont.defaultId), root.optInt("size", 14).let { if (strict) it else it.coerceIn(8, 32) },
                 TerminalPalette.valueOf(root.optString("palette", "DARK")),
                 root.optJSONArray("keyboard")?.let(::decodeKeyboard) ?: KeyboardProfile.default(),
                 root.optJSONObject("keyboardSizing")?.let { KeyboardSizing(it.optInt("height", 38).let { n -> if (strict) n else n.coerceIn(28, 56) },

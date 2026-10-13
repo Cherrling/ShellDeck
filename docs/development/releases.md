@@ -114,3 +114,22 @@ Release 工作流在校验源码时生成一次 `YYYY-MM-DD HH:mm:ss UTC+8`，�
 ## Mosh 原生产物
 
 构建 APK 前运行 `python3 scripts/build_mosh.py`，固定 NDK r29。CI/Release 共享按原生源码指纹生成的产物缓存。正式发布附带 `ShellDeck-<tag>-mosh-sources.tar.gz`，包含实际使用的 Mosh/protobuf/ncurses/OpenSSL 原始源码；与应用源码包一起提供完整构建来源。原生库及依赖许可证随 APK 分发，细节见 `docs/research/mosh.md`。
+
+## 正常版与精简版
+
+同一个 Release 同时发布两个三架构通用 APK：
+
+- `ShellDeck-<tag>-universal.apk`：正常版，内置 Maple Mono NF CN，保留原下载链接。
+- `ShellDeck-<tag>-lite-universal.apk`：精简版，不包含任何字体文件，默认系统等宽字体，保留字体导入功能。
+
+两版使用相同 applicationId、versionCode、签名与构建时间，可以覆盖切换、保留应用数据，不能并排安装。正常版切换到精简版时，保存的 Maple 选择在读取时回退为系统字体；已导入字体不受影响。以后切回正常版，未被用户修改的 Maple 选择仍能恢复。
+
+默认 Gradle 命令构建正常版，精简版加 `-PbundledFonts=false`，例如：
+
+```sh
+./gradlew -PbundledFonts=false :app:lintRelease :app:assembleRelease
+python3 scripts/release.py verify-apk app/build-lite/outputs/apk/release/app-release.apk
+python3 scripts/release.py verify-fonts app/build-lite/outputs/apk/release/app-release.apk lite
+```
+
+正常版资源位于 `app/src/bundled/`，精简版不会包含该目录。精简版 app 构建输出独立放入 `app/build-lite/`，避免切换构建参数后误取旧包。两版共用原生 Mosh、SDK、依赖缓存，不重复编译原生依赖。CI 构建、lint、测试两版并检查实际 APK 字体条目；Release 分别校验两版签名、包名、版本及字体内容，统一写入 SHA256SUMS。

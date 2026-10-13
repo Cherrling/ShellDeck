@@ -86,6 +86,12 @@ jobs:
           python3 -m unittest discover -s scripts -p 'test_*.py'
       - name: Lint, test and build debug APK
         run: SSH_TEST_SUDO=1 python3 scripts/ssh_test_server.py -- ./gradlew --no-daemon :app:lintDebug :app:testDebugUnitTest :terminal-emulator:testDebugUnitTest :app:assembleDebug
+      - name: Lint, test and build font-free APK
+        run: SSH_TEST_SUDO=1 python3 scripts/ssh_test_server.py -- ./gradlew --no-daemon -PbundledFonts=false :app:lintDebug :app:testDebugUnitTest :app:assembleDebug
+      - name: Verify font packaging in both APKs
+        run: |
+          python3 scripts/release.py verify-fonts app/build/outputs/apk/debug/app-debug.apk bundled
+          python3 scripts/release.py verify-fonts app/build-lite/outputs/apk/debug/app-debug.apk lite
       - name: Save Android SDK packages
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && steps.sdk-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4

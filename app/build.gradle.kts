@@ -21,7 +21,20 @@ val sourceRevision = providers.environmentVariable("SHELLDECK_SOURCE_REVISION").
 require(buildTime == "Local build (unrecorded)" || Regex("\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2} UTC\\+8").matches(buildTime))
 require(sourceRevision == "local" || Regex("[0-9a-f]{40}").matches(sourceRevision))
 
+// Separate outputs prevent accidentally publishing a stale APK when switching editions.
+val bundledFonts = providers.gradleProperty("bundledFonts").orElse("true").get().let {
+    require(it == "true" || it == "false") { "bundledFonts must be true or false" }
+    it.toBoolean()
+}
+if (!bundledFonts) layout.buildDirectory.set(layout.projectDirectory.dir("build-lite"))
+
 android {
+    sourceSets.getByName("main").apply {
+        val edition = if (bundledFonts) "bundled" else "lite"
+        java.srcDir("src/$edition/java")
+        res.srcDir("src/$edition/res")
+        assets.srcDir("src/$edition/assets")
+    }
     namespace = "cc.cherr.shelldeck"
     compileSdk = 36
     buildToolsVersion = "35.0.0"

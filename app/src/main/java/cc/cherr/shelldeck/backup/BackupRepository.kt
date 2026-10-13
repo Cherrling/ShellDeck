@@ -73,7 +73,7 @@ class BackupRepository(
                     RestoreEntry(proxy.id, proxy.label, "${proxy.hostname}:${proxy.port}", match?.id, match?.label,
                         match?.let { "${it.hostname}:${it.port}" })
                 }
-                return PreparedRestore(wrapped, data.hosts, if (missingFont) settings.copy(fontId = "maple") else settings,
+                return PreparedRestore(wrapped, data.hosts, if (missingFont) settings.copy(fontId = AppSettings().fontId) else settings,
                     missingFont, snapshot.first, snapshot.second, identities, hosts, proxies, snapshot.third, proxyEntries)
             }
         } catch (failure: Exception) { wrapped.forEach { it.encryptedKey.fill(0) }; proxies.forEach { it.encryptedCredentials.fill(0) }; throw failure }

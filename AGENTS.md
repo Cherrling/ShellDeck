@@ -124,3 +124,5 @@ Terminal 是产品核心。优先保证终端兼容性、稳定性、低功耗�
 - 应用代码更新推送前递增 versionCode，保持同一正式签名。rolling tag 是唯一允许自动移动的发布 tag；`v*` tag 仍保持不可变。
 
 - 以后发布标题、说明、build-info.json 与应用内构建时间统一使用 UTC+8（Asia/Shanghai），显示时明确标注 `UTC+8`。历史 Release 不追溯改写。
+
+- Release 同时生成正常版 `ShellDeck-<tag>-universal.apk` 和不含字体文件的精简版 `ShellDeck-<tag>-lite-universal.apk`；后者用 `-PbundledFonts=false` 构建，输出到 `app/build-lite/`。两版包名、版本和签名相同，分别验证字体内容；详见 docs/development/releases.md。

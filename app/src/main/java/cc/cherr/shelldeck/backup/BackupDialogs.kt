@@ -48,7 +48,7 @@ fun BackupDialogs(controller: BackupController) {
                     Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                         Checkbox(controller.restoreSettings, { controller.restoreSettings = it }); Text("同时恢复设置")
                     }
-                    if (plan.missingFont) Text("备份使用的导入字体在本机不存在。恢复设置时将改用内置 Maple Mono，可随后重新导入字体。")
+                    if (plan.missingFont) Text("备份使用的字体在本机不存在。恢复设置时将改用此版本的默认字体，可随后重新导入字体。")
                     Text("恢复前需关闭活动连接。服务器指纹仍按本机记录验证。", style = MaterialTheme.typography.bodySmall)
                 }
                 if (plan.identityEntries.isNotEmpty()) item { Text("身份", style = MaterialTheme.typography.titleMedium) }

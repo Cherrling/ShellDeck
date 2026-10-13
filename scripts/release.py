@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 APPLICATION_ID = "cc.cherr.shelldeck"
@@ -60,6 +61,24 @@ def validate_apk_output(badging: str, signatures: str, version: str, code: int, 
         raise ValueError("APK signer does not match the configured release certificate")
 
 
+def validate_font_packaging(apk: Path, edition: str) -> None:
+    with zipfile.ZipFile(apk) as archive:
+        fonts = sorted(name for name in archive.namelist()
+                       if Path(name).suffix.lower() in {".ttf", ".otf", ".ttc", ".woff", ".woff2"})
+        expected = "res/font/maple_mono_nf_cn_regular.ttf"
+        if edition == "lite":
+            if fonts:
+                raise ValueError(f"Lite APK must not contain fonts: {fonts}")
+        elif edition == "bundled":
+            if fonts != [expected]:
+                raise ValueError(f"Bundled APK must contain Maple Mono only: {fonts}")
+            source = ROOT / "app/src/bundled/res/font/maple_mono_nf_cn_regular.ttf"
+            if archive.read(expected) != source.read_bytes():
+                raise ValueError("Bundled font differs from source")
+        else:
+            raise ValueError("Unknown font edition")
+
+
 def build_metadata(version: str, code: int, timestamp: str, revision: str) -> dict:
     parsed = datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S UTC+8")
     if parsed.strftime("%Y-%m-%d %H:%M:%S UTC+8") != timestamp or not re.fullmatch(r"[0-9a-f]{40}", revision):
@@ -75,7 +94,14 @@ def main() -> None:
     sub.add_parser("metadata")
     verify = sub.add_parser("verify-apk")
     verify.add_argument("apk", type=Path)
+    fonts = sub.add_parser("verify-fonts")
+    fonts.add_argument("apk", type=Path)
+    fonts.add_argument("edition", choices=("bundled", "lite"))
     args = parser.parse_args()
+    if args.command == "verify-fonts":
+        validate_font_packaging(args.apk, args.edition)
+        print(f"Verified {args.edition} font packaging: {args.apk}")
+        return
     version, code = read_version(ROOT / "version.properties")
     if args.command == "metadata":
         print(json.dumps(build_metadata(version, code, os.environ["SHELLDECK_BUILD_TIME"], os.environ["SHELLDECK_SOURCE_REVISION"]), indent=2))

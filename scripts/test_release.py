@@ -1,11 +1,35 @@
 import tempfile
 from pathlib import Path
 import unittest
+import zipfile
 
-from release import read_version, validate_tag, validate_apk_output, build_metadata
+from release import read_version, validate_tag, validate_apk_output, build_metadata, validate_font_packaging, ROOT
 
 
 class ReleaseValidationTest(unittest.TestCase):
+    def test_font_packaging_checks_actual_apk_contents(self):
+        with tempfile.TemporaryDirectory() as directory:
+            apk = Path(directory) / "app.apk"
+            with zipfile.ZipFile(apk, "w") as archive:
+                archive.writestr("assets/terminfo/x/xterm", b"terminfo")
+            validate_font_packaging(apk, "lite")
+            with self.assertRaises(ValueError):
+                validate_font_packaging(apk, "bundled")
+            with zipfile.ZipFile(apk, "a") as archive:
+                archive.write(ROOT / "app/src/bundled/res/font/maple_mono_nf_cn_regular.ttf",
+                              "res/font/maple_mono_nf_cn_regular.ttf")
+            validate_font_packaging(apk, "bundled")
+            with self.assertRaises(ValueError):
+                validate_font_packaging(apk, "lite")
+            with zipfile.ZipFile(apk, "w") as archive:
+                archive.writestr("res/font/maple_mono_nf_cn_regular.ttf", b"wrong font")
+            with self.assertRaises(ValueError):
+                validate_font_packaging(apk, "bundled")
+            with zipfile.ZipFile(apk, "w") as archive:
+                archive.writestr("assets/hidden.OTF", b"font")
+            with self.assertRaises(ValueError):
+                validate_font_packaging(apk, "lite")
+
     def test_build_metadata_rejects_ambiguous_dates_and_revisions(self):
         info = build_metadata("0.1.0", 13, "2026-10-05 15:00:00 UTC+8", "ab" * 20)
         self.assertEqual(info["versionCode"], 13)

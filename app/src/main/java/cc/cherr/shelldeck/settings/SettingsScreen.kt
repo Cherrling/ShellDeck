@@ -133,7 +133,7 @@ fun SettingsScreen(model: ShellDeckModel, onIdentities: () -> Unit = {}, onEdito
                         SettingsValue("构建时间", if (BuildConfig.BUILD_TIME == "Local build (unrecorded)") "本地构建（未记录）" else BuildConfig.BUILD_TIME)
                         SettingsValue("源码提交", "提交：${BuildConfig.SOURCE_REVISION}")
                     }
-                    SettingsGroup("字体许可") { SettingsValue("Maple Mono", "SIL Open Font License 1.1") }
+                    if (BundledFont.entries.isNotEmpty()) SettingsGroup("字体许可") { SettingsValue("Maple Mono", "SIL Open Font License 1.1") }
                 }
             }
         }

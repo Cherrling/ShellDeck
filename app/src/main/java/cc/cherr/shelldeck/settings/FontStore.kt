@@ -5,7 +5,6 @@ import androidx.core.content.edit
 import android.graphics.Typeface
 import android.net.Uri
 import android.provider.OpenableColumns
-import cc.cherr.shelldeck.R
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -22,12 +21,12 @@ class FontStore(private val context: Context) {
         List(array.length()) { i -> array.getJSONObject(i).let { FontEntry(it.getString("id"), it.getString("label"), true) } }
             .filter { it.id.matches(Regex("[0-9a-f-]{36}")) && File(folder, it.id).isFile }
     } catch (_: Exception) { emptyList() }
-    fun entries() = listOf(FontEntry("system", "系统等宽字体"), FontEntry("maple", "Maple Mono NF CN")) + imported()
+    fun entries() = listOf(FontEntry("system", "系统等宽字体")) + BundledFont.entries + imported()
     private fun save(entries: List<FontEntry>) { prefs.edit { putString("fonts", JSONArray().apply {
         entries.forEach { put(JSONObject().put("id", it.id).put("label", it.label)) }
     }.toString()) } }
     fun load(id: String): Typeface = cache.getOrPut(id) {
-        if (id == "maple") context.resources.getFont(R.font.maple_mono_nf_cn_regular)
+        if (id == "maple") BundledFont.load(context)
         else {
             require(imported().any { it.id == id })
             Typeface.createFromFile(File(folder, id))

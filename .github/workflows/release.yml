@@ -129,11 +129,17 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: ./gradlew --no-daemon --no-build-cache :app:lintRelease :app:assembleRelease
+        run: |
+          ./gradlew --no-daemon --no-build-cache :app:lintRelease :app:assembleRelease
+          ./gradlew --no-daemon --no-build-cache -PbundledFonts=false :app:lintRelease :app:assembleRelease
       - name: Verify identity, version and release certificate
         env:
           ANDROID_SIGNING_CERT_SHA256: ${{ vars.ANDROID_SIGNING_CERT_SHA256 }}
-        run: python3 scripts/release.py verify-apk app/build/outputs/apk/release/app-release.apk
+        run: |
+          python3 scripts/release.py verify-apk app/build/outputs/apk/release/app-release.apk
+          python3 scripts/release.py verify-apk app/build-lite/outputs/apk/release/app-release.apk
+          python3 scripts/release.py verify-fonts app/build/outputs/apk/release/app-release.apk bundled
+          python3 scripts/release.py verify-fonts app/build-lite/outputs/apk/release/app-release.apk lite
       - name: Remove keystore
         if: always()
         run: rm -f "$RUNNER_TEMP/shelldeck-release.jks"
@@ -142,6 +148,7 @@ jobs:
           mkdir -p dist
           python3 scripts/release.py metadata > dist/build-info.json
           cp app/build/outputs/apk/release/app-release.apk "dist/ShellDeck-${RELEASE_TAG}-universal.apk"
+          cp app/build-lite/outputs/apk/release/app-release.apk "dist/ShellDeck-${RELEASE_TAG}-lite-universal.apk"
           git archive --format=tar.gz --prefix="ShellDeck-${RELEASE_TAG}/" \
             --output="dist/ShellDeck-${RELEASE_TAG}-source.tar.gz" HEAD
           tar -czf "dist/ShellDeck-${RELEASE_TAG}-mosh-sources.tar.gz" -C build/mosh mosh.tar.gz protobuf.tar.gz ncurses.tar.gz openssl.tar.gz
@@ -189,17 +196,20 @@ jobs:
 
           版本详情见 build-info.json，也可在 App 设置页查看。
 
-          下载 ShellDeck-${RELEASE_TAG}-universal.apk；SHA256SUMS 包含文件校验值。
+          正常版：ShellDeck-${RELEASE_TAG}-universal.apk，内置 Maple Mono NF CN 字体。
+          精简版：ShellDeck-${RELEASE_TAG}-lite-universal.apk，不含字体文件，使用系统等宽字体，支持自行导入字体。
+          两版包名、签名和版本相同，可覆盖切换并保留数据，不能同时安装。切换到精简版时内置字体回退为系统字体。
+          SHA256SUMS 包含两个 APK 的文件校验值。
           EOF
           if [ "$RELEASE_TAG" = rolling ]; then
             if gh release view rolling >/dev/null 2>"$RUNNER_TEMP/rolling-error"; then
-              gh release upload rolling --clobber ShellDeck-rolling-universal.apk ShellDeck-rolling-source.tar.gz ShellDeck-rolling-mosh-sources.tar.gz build-info.json SHA256SUMS
+              gh release upload rolling --clobber ShellDeck-rolling-universal.apk ShellDeck-rolling-lite-universal.apk ShellDeck-rolling-source.tar.gz ShellDeck-rolling-mosh-sources.tar.gz build-info.json SHA256SUMS
               gh api --method PATCH "repos/$GH_REPO/git/refs/tags/rolling" -f sha="$SOURCE_SHA" -F force=true
               gh release edit rolling --latest --prerelease=false --title "ShellDeck 滚动更新 · $BUILD_TIME" --notes-file "$RUNNER_TEMP/release-notes.md"
             elif grep -Eqi 'release not found|HTTP 404' "$RUNNER_TEMP/rolling-error"; then
               gh release create rolling --target "$SOURCE_SHA" --latest --title "ShellDeck 滚动更新 · $BUILD_TIME" \
                 --notes-file "$RUNNER_TEMP/release-notes.md" \
-                ShellDeck-rolling-universal.apk ShellDeck-rolling-source.tar.gz ShellDeck-rolling-mosh-sources.tar.gz build-info.json SHA256SUMS
+                ShellDeck-rolling-universal.apk ShellDeck-rolling-lite-universal.apk ShellDeck-rolling-source.tar.gz ShellDeck-rolling-mosh-sources.tar.gz build-info.json SHA256SUMS
             else
               cat "$RUNNER_TEMP/rolling-error" >&2
               exit 1
@@ -212,5 +222,5 @@ jobs:
           fi
           gh release create "$RELEASE_TAG" --verify-tag --generate-notes --notes-file "$RUNNER_TEMP/release-notes.md" \
             --title "ShellDeck $RELEASE_TAG · $BUILD_TIME" "${options[@]}" \
-            "ShellDeck-${RELEASE_TAG}-universal.apk" \
+            "ShellDeck-${RELEASE_TAG}-universal.apk" "ShellDeck-${RELEASE_TAG}-lite-universal.apk" \
             "ShellDeck-${RELEASE_TAG}-source.tar.gz" "ShellDeck-${RELEASE_TAG}-mosh-sources.tar.gz" build-info.json SHA256SUMS

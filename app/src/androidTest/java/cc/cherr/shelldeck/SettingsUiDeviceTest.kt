@@ -95,7 +95,7 @@ class SettingsUiDeviceTest {
             ui.onNodeWithText("深色", substring = false).performClick()
             ui.waitForIdle()
             androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
-            ui.waitUntil(10000) { model.fonts.size >= 2 }
+            ui.waitUntil(10000) { model.fonts.isNotEmpty() }
             ui.onNodeWithText("字体与字号").performClick()
             ui.onNodeWithText("系统等宽字体").performScrollTo().performClick()
             ui.waitForIdle()

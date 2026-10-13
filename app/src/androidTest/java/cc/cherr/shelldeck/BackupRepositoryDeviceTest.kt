@@ -49,7 +49,7 @@ class BackupRepositoryDeviceTest {
             assertTrue(targetDb.records().hosts().isEmpty()); assertTrue(targetDb.records().identities().isEmpty())
             assertEquals(AppSettings(), targetSettings.read())
             target.prepare(file, password).use { plan ->
-                assertTrue(plan.missingFont); assertEquals("maple", plan.settings.fontId)
+                assertTrue(plan.missingFont); assertEquals(AppSettings().fontId, plan.settings.fontId)
                 assertTrue(targetDb.records().identities().isEmpty()) // Preview has no database side effects.
                 val result = target.restore(plan, emptyMap(), emptyMap(), true)
                 assertEquals(1, result.identities); assertEquals(1, result.hosts); assertTrue(result.settingsSaved)
