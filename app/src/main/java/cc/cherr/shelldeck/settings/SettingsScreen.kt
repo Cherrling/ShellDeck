@@ -101,6 +101,13 @@ fun SettingsScreen(model: ShellDeckModel, onIdentities: () -> Unit = {}, onEdito
                     SettingsGroup {
                         SettingsLink("编辑快捷键布局", "自定义按键，长按拖动排序", R.drawable.ic_keyboard) { editing = true }
                     }
+                    SettingsGroup("快捷键栏位置") {
+                        cc.cherr.shelldeck.keyboard.KeyboardPlacement.entries.forEach { position ->
+                            SettingsRadio(position.label, settings.keyboardPlacement == position) {
+                                model.updateSettings(model.settings.copy(keyboardPlacement = position))
+                            }
+                        }
+                    }
                     SettingsGroup("大小与布局") {
                         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             KeyboardSizeSettings(settings.keyboard, settings.keyboardSizing) {
@@ -108,7 +115,7 @@ fun SettingsScreen(model: ShellDeckModel, onIdentities: () -> Unit = {}, onEdito
                             }
                         }
                     }
-                    SettingsNote("两行整体左右滑动。修饰键点按用于下一次输入；按住持续生效；长按后松手锁定，再点解除。")
+                    SettingsNote("底部为两行，整体左右滑动；侧边为两列，整体上下滑动。自动模式跟随窗口横竖屏，弹出键盘不会切换位置。修饰键点按用于下一次输入；按住持续生效；长按后松手锁定，再点解除。")
                 }
                 SettingsPage.PROXIES -> Unit
                 SettingsPage.CONNECTION -> {

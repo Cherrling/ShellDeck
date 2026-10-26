@@ -21,11 +21,11 @@ internal fun KeyboardSizeSettings(profile: KeyboardProfile, saved: KeyboardSizin
     Text("行高：${size.rowHeight} dp")
     Slider(size.rowHeight.toFloat(), { size = size.copy(rowHeight = it.roundToInt()) }, valueRange = 28f..56f, steps = 27,
         onValueChangeFinished = { save(size) }, modifier = Modifier.testTag("key-height-slider"))
-    Text("每行显示：${size.visibleKeys} 个")
+    Text("每行／列显示：${size.visibleKeys} 个")
     Slider(size.visibleKeys.toFloat(), { size = size.copy(visibleKeys = it.roundToInt()) }, valueRange = 4f..12f, steps = 7,
         onValueChangeFinished = { save(size) }, modifier = Modifier.testTag("key-count-slider"))
-    Text("超出的按键可左右滑动；加宽按键按所占格数计算。", style = MaterialTheme.typography.bodySmall)
-    Text("预览（可左右滑动）", style = MaterialTheme.typography.bodySmall)
+    Text("底部左右滑动，侧边上下滑动；侧边按键不低于设定行高，空间不足时滑动查看更多。加宽按键在侧边对应加高。", style = MaterialTheme.typography.bodySmall)
+    Text("底部布局预览（可左右滑动）", style = MaterialTheme.typography.bodySmall)
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         val keyWidth = with(androidx.compose.ui.platform.LocalDensity.current) { (constraints.maxWidth / size.visibleKeys).toDp() }
         Surface(tonalElevation = 2.dp) {

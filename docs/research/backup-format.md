@@ -35,7 +35,7 @@
 3. 主机数量（0–5000）；每个主机为 id、label、hostname、int32 port、username、identityId 是否存在及可选文本、v2 增加 jumpHostId 是否存在及可选文本，v3 增加 proxyId 是否存在及可选文本；随后为 startupCommand、boolean favorite、int64 lastUsedAt；v4 在主机尾部增加 protocol 文本与 int32 moshPort（0 表示自动）。
 4. v3 起增加代理列表（0–1000）：id、label、hostname、port、remoteDns、authenticated 和凭据二进制。旧载荷默认无代理；v1–v3 主机默认使用 SSH。
 
-拒绝重复 id、悬空 identityId、非法协议、Mosh 与跳板机/代理的冲突组合、非法端口、控制字符启动命令和尾部多余数据。设置验证版本、取值范围、快捷键数据结构；额外限制 JSON 嵌套深度，避免递归解析资源耗尽。本机旧设置仍使用兼容读取规则，新备份使用严格校验。
+拒绝重复 id、悬空 identityId、非法协议、Mosh 与跳板机/代理的冲突组合、非法端口、控制字符启动命令和尾部多余数据。设置验证版本、取值范围、快捷键数据结构；额外限制 JSON 嵌套深度，避免递归解析资源耗尽。本机旧设置仍使用兼容读取规则，新备份使用严格校验。设置 JSON 的可选 `keyboardPlacement` 为 BOTTOM / LEFT / RIGHT / AUTO；缺失默认 BOTTOM，严格导入拒绝未知值，不改变备份载荷版本。
 
 备份只在内存中解开源设备 vault，并通过独立备份密码重新加密。恢复预览前，载荷中的私钥已用当前设备 Keystore 包装，预览状态不保留明文私钥。自己的 byte[] / char[]、可控编码缓冲区在完成、取消、失败和销毁时尽力清零，包括扩容前的旧缓冲区；不声称能清除 JVM、系统 provider 和第三方私钥对象的所有副本。
 

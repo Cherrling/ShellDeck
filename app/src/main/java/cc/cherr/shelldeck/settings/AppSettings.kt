@@ -13,7 +13,8 @@ enum class TerminalPalette { DARK, LIGHT }
 data class AppSettings(val theme: ThemeMode = ThemeMode.SYSTEM, val dynamicColor: Boolean = true,
     val fontId: String = BundledFont.defaultId, val fontSize: Int = 14, val palette: TerminalPalette = TerminalPalette.DARK,
     val keyboard: KeyboardProfile = KeyboardProfile.default(), val keyboardSizing: KeyboardSizing = KeyboardSizing(),
-    val backgroundMode: BackgroundMode = BackgroundMode.NORMAL, val terminalTheme: TerminalTheme? = null, val keepAliveSeconds: Int = 60)
+    val backgroundMode: BackgroundMode = BackgroundMode.NORMAL, val terminalTheme: TerminalTheme? = null, val keepAliveSeconds: Int = 60,
+    val keyboardPlacement: KeyboardPlacement = KeyboardPlacement.BOTTOM)
 
 /** Non-secret preferences only. SSH credentials never enter this store. */
 class SettingsStore(context: Context, name: String = "appearance_and_keyboard") {
@@ -59,13 +60,16 @@ class SettingsStore(context: Context, name: String = "appearance_and_keyboard") 
                 if (strict) BackgroundMode.valueOf(root.optString("backgroundMode", "NORMAL"))
                 else BackgroundMode.entries.firstOrNull { it.name == root.optString("backgroundMode") } ?: BackgroundMode.NORMAL,
                 if (root.has("terminalTheme") && !root.isNull("terminalTheme")) TerminalTheme.fromJson(root.getJSONObject("terminalTheme")) else null,
-                root.optInt("keepAliveSeconds", 60).also { require(it in listOf(0, 60, 120)) })
+                root.optInt("keepAliveSeconds", 60).also { require(it in listOf(0, 60, 120)) },
+                if (strict && root.has("keyboardPlacement")) KeyboardPlacement.valueOf(root.getString("keyboardPlacement"))
+                else KeyboardPlacement.entries.firstOrNull { it.name == root.optString("keyboardPlacement") } ?: KeyboardPlacement.BOTTOM)
                 .also { require(it.fontSize in 8..32 && it.fontId.length <= 128); it.keyboard.validate(); it.keyboardSizing.validate() }
         }
         fun encode(settings: AppSettings): String {
             settings.keyboard.validate(); settings.keyboardSizing.validate(); require(settings.fontSize in 8..32 && settings.keepAliveSeconds in listOf(0, 60, 120))
             return JSONObject().put("version", 2).put("theme", settings.theme.name).put("dynamic", settings.dynamicColor)
                 .put("keepAliveSeconds", settings.keepAliveSeconds)
+                .put("keyboardPlacement", settings.keyboardPlacement.name)
                 .put("terminalTheme", settings.terminalTheme?.json() ?: JSONObject.NULL)
                 .put("font", settings.fontId).put("size", settings.fontSize).put("palette", settings.palette.name)
                 .put("backgroundMode", settings.backgroundMode.name).put("keyboard", encodeKeyboard(settings.keyboard))

@@ -33,7 +33,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.SecureFlagPolicy
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -46,7 +45,6 @@ import cc.cherr.shelldeck.ui.ShellDeckTheme
 import cc.cherr.shelldeck.settings.SettingsScreen
 import cc.cherr.shelldeck.settings.GenerateIdentityDialog
 import cc.cherr.shelldeck.settings.PublicKeyDialogs
-import cc.cherr.shelldeck.keyboard.ExtraKeysBar
 import androidx.compose.runtime.saveable.rememberSaveable
 
 private enum class MainPage(val label: String, val icon: Int) {
@@ -183,11 +181,8 @@ private fun ShellDeckApp(model: ShellDeckModel, activity: MainActivity) {
                         if (fallback.identityId == null) login = fallback else model.connect(fallback, "")
                     }
                 }
-                key(terminal) {
-                    AndroidView(factory = terminal::createView, modifier = Modifier.weight(1f).fillMaxWidth(),
-                        onRelease = terminal::releaseView, update = {})
-                }
-                ExtraKeysBar(model.settings.keyboard, terminal, model.settings.keyboardSizing)
+                TerminalWorkspace(terminal, model.settings.keyboard, model.settings.keyboardSizing,
+                    model.settings.keyboardPlacement, Modifier.weight(1f).fillMaxWidth())
             } else {
                 ManagementHeading(
                     if (showIdentities) "SSH 身份与密钥" else if (page == MainPage.SESSIONS) "活动会话" else page.label,
