@@ -25,6 +25,14 @@ class BackupRepository(
 ) {
     private val dao = database.records()
     fun export(password: CharArray): ByteArray {
+        val plain = exportPayload()
+        return try { BackupCrypto.encrypt(plain, password) } finally { plain.fill(0) }
+    }
+    internal fun exportPlainForQr(): ByteArray {
+        val plain = exportPayload()
+        return try { cc.cherr.shelldeck.qrs.QrsBackup.wrapPlain(plain) } finally { plain.fill(0) }
+    }
+    private fun exportPayload(): ByteArray {
         val snapshot = database.runInTransaction(Callable { Triple(dao.identities(), dao.hosts(), dao.proxies()) })
         val keys = mutableListOf<BackupIdentity>()
         val proxies = mutableListOf<BackupProxy>()
@@ -32,11 +40,12 @@ class BackupRepository(
             snapshot.first.forEach { keys.add(BackupIdentity(it, vault.decrypt(it.id, it.encryptedKey))) }
             snapshot.third.forEach { proxies.add(BackupProxy(it, if (it.authenticated) vault.decrypt("proxy:${it.id}", it.encryptedCredentials) else byteArrayOf())) }
             val plain = BackupCodec.encode(BackupData(keys, snapshot.second, SettingsStore.encode(settingsStore.read()), proxies))
-            return try { BackupCrypto.encrypt(plain, password) } finally { plain.fill(0) }
+            return plain
         } finally { keys.forEach { it.privateKey.fill(0) }; proxies.forEach { it.credentials.fill(0) } }
     }
-    fun prepare(file: ByteArray, password: CharArray): PreparedRestore {
-        val plain = BackupCrypto.decrypt(file, password)
+    fun prepare(file: ByteArray, password: CharArray): PreparedRestore = preparePayload(BackupCrypto.decrypt(file, password))
+    internal fun preparePlainFromQr(file: ByteArray): PreparedRestore = preparePayload(cc.cherr.shelldeck.qrs.QrsBackup.unwrapPlain(file))
+    private fun preparePayload(plain: ByteArray): PreparedRestore {
         val wrapped = mutableListOf<IdentityRecord>()
         val proxies = mutableListOf<ProxyRecord>()
         try {

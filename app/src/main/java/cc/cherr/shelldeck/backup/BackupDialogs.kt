@@ -20,6 +20,7 @@ import androidx.compose.ui.window.SecureFlagPolicy
 
 @Composable
 fun BackupDialogs(controller: BackupController) {
+    cc.cherr.shelldeck.qrs.QrsDialogs(controller)
     val save = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream"), controller::save)
     val open = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) controller.restoreFile(uri) }
     val request = controller.export
@@ -32,6 +33,8 @@ fun BackupDialogs(controller: BackupController) {
     if (controller.menu) AlertDialog(onDismissRequest = { controller.menu = false }, title = { Text("备份与恢复") },
         text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("备份主机、身份私钥、启动命令及设置。导入的字体文件需另行保存；服务器信任记录不迁移。")
+            TextButton(onClick = { controller.menu = false; controller.backupQr() }) { Text("通过二维码发送备份") }
+            TextButton(onClick = { controller.menu = false; controller.scanQr() }) { Text("扫描二维码恢复") }
             TextButton(onClick = { controller.menu = false; controller.backup() }) { Text("创建加密备份") }
             TextButton(onClick = {
                 controller.menu = false
@@ -43,6 +46,7 @@ fun BackupDialogs(controller: BackupController) {
         AlertDialog(onDismissRequest = controller::cancel, title = { Text("恢复预览") },
             text = { LazyColumn(Modifier.heightIn(max = 420.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 item {
+                    if (controller.plainQrPreview) Text("此备份通过不加密二维码接收。请确认来源及下列内容后恢复。", color = MaterialTheme.colorScheme.error)
                     Text("${plan.identityEntries.size} 个身份 · ${plan.hostEntries.size} 个主机 · ${plan.proxyEntries.size} 个代理")
                     Text("重复条目默认保留本机。使用备份会覆盖所列记录；导入副本会创建独立条目。", style = MaterialTheme.typography.bodySmall)
                     Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
@@ -88,10 +92,16 @@ private fun TransferPasswordDialog(controller: BackupController, form: TransferF
     var original by remember(form) { mutableStateOf("") }
     var encrypted by remember(form) { mutableStateOf(true) }
     val restore = form.kind == TransferKind.RESTORE
-    val protected = form.kind != TransferKind.PRIVATE_KEY || encrypted
+    val protected = (form.kind != TransferKind.PRIVATE_KEY && !form.qrs) || restore || encrypted
     AlertDialog(properties = DialogProperties(securePolicy = SecureFlagPolicy.SecureOn), onDismissRequest = controller::cancel,
-        title = { Text(when(form.kind) { TransferKind.BACKUP -> "创建加密备份"; TransferKind.RESTORE -> "打开备份"; TransferKind.PRIVATE_KEY -> "导出私钥" }) },
+        title = { Text(when(form.kind) { TransferKind.BACKUP -> if (form.qrs) "通过二维码发送备份" else "创建加密备份"; TransferKind.RESTORE -> "打开备份"; TransferKind.PRIVATE_KEY -> "导出私钥" }) },
         text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (form.kind == TransferKind.BACKUP && form.qrs) {
+                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    Checkbox(encrypted, { encrypted = it }, enabled = !controller.busy); Text("使用密码加密（推荐）")
+                }
+                if (!encrypted) Text("二维码将包含完整备份及私钥，拍摄到足够二维码画面的人可能还原内容。仅向可信设备发送。", color = MaterialTheme.colorScheme.error)
+            }
             if (form.kind == TransferKind.PRIVATE_KEY) {
                 Text(form.label)
                 Text("导出为标准 PKCS#8 PEM，可重新导入 ShellDeck 或支持该格式的工具。")
@@ -100,7 +110,7 @@ private fun TransferPasswordDialog(controller: BackupController, form: TransferF
                 }
                 if (!encrypted) Text("将导出无口令的完整私钥。任何获得文件的人都可以使用这把密钥，请妥善保存。", color = MaterialTheme.colorScheme.error)
                 if (form.needsUnlock) PasswordField(original, { original = it }, "原私钥口令", !controller.busy)
-            } else if (!restore) Text("备份密码独立于私钥口令。请牢记密码；恢复后，原有私钥口令仍然有效。")
+            } else if (!restore && protected) Text("备份密码独立于私钥口令。请牢记密码；恢复后，原有私钥口令仍然有效。")
             if (protected) {
                 PasswordField(password, { password = it }, if (restore) "备份密码" else "导出密码（至少 8 位）", !controller.busy)
                 if (!restore) PasswordField(confirmation, { confirmation = it }, "再次输入导出密码", !controller.busy)
@@ -110,7 +120,7 @@ private fun TransferPasswordDialog(controller: BackupController, form: TransferF
             (if (restore) password.isNotEmpty() else password.length >= 8 && password == confirmation)), onClick = {
             controller.prepare(password, original, encrypted)
             password = ""; confirmation = ""; original = ""
-        }) { Text(if (restore) "查看预览" else "选择保存位置") } },
+        }) { Text(if (restore) "查看预览" else if (form.qrs) "显示二维码" else "选择保存位置") } },
         dismissButton = { TextButton(enabled = !controller.busy, onClick = controller::cancel) { Text("取消") } })
 }
 @Composable

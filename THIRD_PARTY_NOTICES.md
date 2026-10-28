@@ -35,3 +35,9 @@ Wrapper JAR 下载时已与 Gradle 官方发布的 SHA-256 校验值核对；Gra
 - SLF4J 2.0.17：MIT；使用 nop backend，不记录 SSH 协议或凭据日志。
 - asn-one 0.6.0：Apache-2.0，作为 SSHJ 依赖。
 - Room 2.8.4 及 AndroidX Test：Apache-2.0。
+
+## QRS 传输格式与二维码
+
+- QRS 帧头、文件元数据及 CRC32 xor block-count 格式参考 [qifi-dev/qrs](https://github.com/qifi-dev/qrs/tree/fe3f4615052ea65f243d1ee8e7173970e87d79c9)，上游 MIT。ShellDeck 使用独立实现的有界喷泉码编码器/剥离解码器；未复制 SFA 源码。
+- Android 相机和动画交互研究参考 SFA `a548a7903e96266a0046018562c73b192edbfc18`；不导入 SFA 配置格式。
+- 二维码生成/识别：ZXing core 3.5.4（Apache-2.0）；相机：AndroidX CameraX 1.6.2（Apache-2.0）。ZXing 的上游 NOTICE 与 Apache-2.0 全文放在 `app/src/main/assets/licenses/zxing/` 随两版 APK 分发；CameraX 同为 Apache-2.0，随 APK 附带该许可证全文。

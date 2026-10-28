@@ -14,7 +14,7 @@ import java.util.UUID
 import java.util.concurrent.Executors
 
 enum class TransferKind { BACKUP, RESTORE, PRIVATE_KEY }
-data class TransferForm(val kind: TransferKind, val label: String = "", val identityId: String? = null, val uri: Uri? = null, val needsUnlock: Boolean = false)
+data class TransferForm(val kind: TransferKind, val label: String = "", val identityId: String? = null, val uri: Uri? = null, val needsUnlock: Boolean = false, val qrs: Boolean = false)
 class ExportRequest(val filename: String, internal val bytes: ByteArray) {
     val id: String = UUID.randomUUID().toString()
     var launched = false
@@ -26,6 +26,10 @@ class BackupController(private val context: Context, private val runtime: Connec
     private val worker = Executors.newSingleThreadExecutor()
     private val repository = BackupRepository(runtime.database, runtime.vault, SettingsStore(context)) { FontStore(context).entries().map { it.id }.toSet() }
     @Volatile private var disposed = false
+    var qrsExport by mutableStateOf<cc.cherr.shelldeck.qrs.QrsExport?>(null); private set
+    var qrsReceiver by mutableStateOf<cc.cherr.shelldeck.qrs.QrsReceiver?>(null); private set
+    var plainQrPreview by mutableStateOf(false); private set
+    private var receivedQr: ByteArray? = null
     var busy by mutableStateOf(false); private set
     var menu by mutableStateOf(false)
     var identityChoices by mutableStateOf<Map<String, RestoreChoice>>(emptyMap())
@@ -53,6 +57,28 @@ class BackupController(private val context: Context, private val runtime: Connec
         }
     }
     fun backup() { if (!busy && export == null && preview == null) form = TransferForm(TransferKind.BACKUP) }
+    fun backupQr() { if (!busy && export == null && preview == null && qrsExport == null) form = TransferForm(TransferKind.BACKUP, qrs = true) }
+    fun scanQr() {
+        if (busy || disposed) return
+        cancel()
+        qrsReceiver = cc.cherr.shelldeck.qrs.QrsReceiver()
+    }
+    fun receivedQr(receiver: cc.cherr.shelldeck.qrs.QrsReceiver, file: ByteArray) {
+        if (disposed || qrsReceiver !== receiver) { file.fill(0); return }
+        receiver.close(); qrsReceiver = null
+        if (cc.cherr.shelldeck.qrs.QrsBackup.isEncrypted(file)) {
+            receivedQr = file; form = TransferForm(TransferKind.RESTORE, qrs = true)
+        } else operation("二维码内容不是有效的 ShellDeck 备份。本机数据未修改。") {
+            try {
+                val plan = repository.preparePlainFromQr(file)
+                post(discarded = plan::close) { showPreview(plan); plainQrPreview = true }
+            } finally { file.fill(0) }
+        }
+    }
+    private fun showPreview(plan: PreparedRestore) {
+        form = null; preview = plan
+        identityChoices = emptyMap(); hostChoices = emptyMap(); proxyChoices = emptyMap(); restoreSettings = false
+    }
     fun restoreFile(uri: Uri) { if (!busy && export == null && preview == null) form = TransferForm(TransferKind.RESTORE, uri = uri) }
     fun privateKey(id: String) = operation("私钥读取失败，请检查设备密钥是否可用") {
         val identity = requireNotNull(runtime.dao.identity(id))
@@ -69,7 +95,9 @@ class BackupController(private val context: Context, private val runtime: Connec
     }
     fun cancel() {
         if (busy) return
-        menu = false; form = null; preview?.close(); preview = null
+        menu = false; form = null; preview?.close(); preview = null; plainQrPreview = false
+        qrsExport?.close(); qrsExport = null; qrsReceiver?.close(); qrsReceiver = null
+        receivedQr?.fill(0); receivedQr = null
         export?.bytes?.fill(0); export = null
     }
     fun prepare(password: String, originalPassphrase: String = "", encryptedPrivateKey: Boolean = true) {
@@ -80,13 +108,19 @@ class BackupController(private val context: Context, private val runtime: Connec
             else "导出准备失败，请检查私钥口令、设备密钥和数据大小（备份上限 8 MiB）") {
             try {
                 when (request.kind) {
-                    TransferKind.BACKUP -> offer("ShellDeck-${java.time.LocalDate.now()}.sdbak", repository.export(secret))
+                    TransferKind.BACKUP -> {
+                        if (request.qrs) {
+                            val file = if (encryptedPrivateKey) repository.export(secret) else repository.exportPlainForQr()
+                            val transfer = try { cc.cherr.shelldeck.qrs.QrsExport(file, encryptedPrivateKey) } finally { file.fill(0) }
+                            post(discarded = transfer::close) { form = null; qrsExport = transfer }
+                        } else offer("ShellDeck-${java.time.LocalDate.now()}.sdbak", repository.export(secret))
+                    }
                     TransferKind.RESTORE -> {
-                        val file = context.contentResolver.openInputStream(requireNotNull(request.uri))!!.use(::readBackupFile)
+                        val file = if (request.qrs) requireNotNull(receivedQr).copyOf() else context.contentResolver.openInputStream(requireNotNull(request.uri))!!.use(::readBackupFile)
                         val prepared = try { repository.prepare(file, secret) } finally { file.fill(0) }
                         post(discarded = prepared::close) {
-                            form = null; preview = prepared
-                            identityChoices = emptyMap(); hostChoices = emptyMap(); proxyChoices = emptyMap(); restoreSettings = false
+                            receivedQr?.fill(0); receivedQr = null
+                            showPreview(prepared)
                         }
                     }
                     TransferKind.PRIVATE_KEY -> {
@@ -147,6 +181,8 @@ class BackupController(private val context: Context, private val runtime: Connec
     }
     override fun close() {
         disposed = true; pendingSave = null
+        qrsExport?.close(); qrsExport = null; qrsReceiver?.close(); qrsReceiver = null
+        receivedQr?.fill(0); receivedQr = null
         preview?.close(); preview = null; export?.bytes?.fill(0); export = null; form = null
         worker.shutdown()
     }
