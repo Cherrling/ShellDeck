@@ -1,6 +1,7 @@
 package cc.cherr.shelldeck
 
 import androidx.compose.ui.test.*
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.lifecycle.ViewModelProvider
 import androidx.room.Room
@@ -46,7 +47,9 @@ class QrsTransferDeviceTest {
                 val target = BackupRepository(targetDb, targetVault, targetSettings) { setOf("maple", "system") }
                 val file = if (encrypted) source.export(password) else source.exportPlainForQr()
                 try {
-                    val received = QrsExport(file, encrypted).use { send -> QrsReceiver().use { receive ->
+                    val received = QrsExport(file, encrypted).use { send ->
+                        send.configure(60, if (encrypted) 1500 else 100)
+                        QrsReceiver().use { receive ->
                         var result: ByteArray? = null
                         val reader = QRCodeReader()
                         var attempted = 0; var missed = 0
@@ -135,8 +138,16 @@ class QrsTransferDeviceTest {
             val sender = model.backup.qrsExport!!
             assertFalse(sender.encrypted)
             ui.onNodeWithTag("qrs-display").assertIsDisplayed()
+            ui.onNodeWithText("参数：10 Hz · 500 字节").performClick()
+            ui.onNodeWithTag("qrs-fps").performSemanticsAction(SemanticsActions.SetProgress) { it(37f) }
+            ui.onNodeWithTag("qrs-slice").performSemanticsAction(SemanticsActions.SetProgress) { it(137f) }
+            ui.onNodeWithText("帧率：37 Hz").assertIsDisplayed()
+            ui.onNodeWithText("分块大小：137 字节").assertIsDisplayed()
+            ui.onNodeWithText("应用").performClick()
+            assertEquals(37, sender.fps); assertEquals(137, sender.sliceSize)
             ui.activityRule.scenario.recreate()
             assertSame(sender, model.backup.qrsExport)
+            ui.onNodeWithText("参数：37 Hz · 137 字节").assertIsDisplayed()
             ui.onNodeWithContentDescription("关闭二维码传输").performClick()
             assertThrows(IllegalStateException::class.java) { sender.next() }
             ui.runOnUiThread { model.backup.backupQr() }

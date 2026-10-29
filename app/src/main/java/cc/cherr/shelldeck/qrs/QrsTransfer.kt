@@ -7,6 +7,13 @@ import androidx.compose.runtime.setValue
 class QrsExport(file: ByteArray, val encrypted: Boolean) : AutoCloseable {
     val size = file.size
     private val encoder = QrsEncoder(QrsBackup.frame(file, encrypted))
+    var fps by mutableStateOf(10); private set
+    var sliceSize by mutableStateOf(QrsLimits.SLICE); private set
+    fun configure(fps: Int, bytes: Int) {
+        require(fps in 1..60)
+        encoder.resize(bytes)
+        sliceSize = bytes; this.fps = fps
+    }
     fun next() = encoder.next()
     override fun close() = encoder.close()
 }

@@ -14,6 +14,8 @@ import kotlin.random.Random
 object QrsLimits {
     const val MAX_DATA = 8 * 1024 * 1024 + 4096
     const val SLICE = 500
+    const val MIN_SLICE = 100
+    const val MAX_SLICE = 1500
     const val MAX_BLOCKS = (MAX_DATA + 99) / 100
     const val MAX_DEGREE = 128
     const val MAX_PENDING = 2048
@@ -21,12 +23,20 @@ object QrsLimits {
     fun checksum(bytes: ByteArray, blocks: Int) = CRC32().apply { update(bytes) }.value.toInt() xor blocks
 }
 
-class QrsEncoder(private val data: ByteArray) : AutoCloseable {
-    val blocks = (data.size + QrsLimits.SLICE - 1) / QrsLimits.SLICE
+class QrsEncoder(private val data: ByteArray, private var sliceSize: Int = QrsLimits.SLICE) : AutoCloseable {
+    init { require(data.isNotEmpty() && data.size <= QrsLimits.MAX_DATA && sliceSize in QrsLimits.MIN_SLICE..QrsLimits.MAX_SLICE) }
+    var blocks = (data.size + sliceSize - 1) / sliceSize; private set
     private var sequence = 0L
     private var closed = false
-    private val checksum = QrsLimits.checksum(data, blocks)
-    init { require(data.isNotEmpty() && data.size <= QrsLimits.MAX_DATA) }
+    private var checksum = QrsLimits.checksum(data, blocks)
+
+    @Synchronized fun resize(bytes: Int) {
+        check(!closed)
+        require(bytes in QrsLimits.MIN_SLICE..QrsLimits.MAX_SLICE)
+        if (bytes == sliceSize) return
+        sliceSize = bytes; blocks = (data.size + sliceSize - 1) / sliceSize
+        checksum = QrsLimits.checksum(data, blocks); sequence = 0
+    }
 
     /** Systematic blocks interleaved with sparse LT equations. Missed frames need no acknowledgement. */
     @Synchronized fun next(): String {
@@ -39,14 +49,14 @@ class QrsEncoder(private val data: ByteArray) : AutoCloseable {
             while (selected.size < degree) selected.add(Random.nextInt(blocks))
             selected.sorted().toIntArray()
         }
-        val payload = ByteBuffer.allocate(16 + indices.size * 4 + QrsLimits.SLICE).order(ByteOrder.LITTLE_ENDIAN)
+        val payload = ByteBuffer.allocate(16 + indices.size * 4 + sliceSize).order(ByteOrder.LITTLE_ENDIAN)
         payload.putInt(indices.size); indices.forEach(payload::putInt)
         payload.putInt(blocks); payload.putInt(data.size); payload.putInt(checksum)
-        val chunk = ByteArray(QrsLimits.SLICE)
+        val chunk = ByteArray(sliceSize)
         try {
             indices.forEach { block ->
-                val start = block * QrsLimits.SLICE
-                for (i in 0 until minOf(QrsLimits.SLICE, data.size - start)) chunk[i] = (chunk[i].toInt() xor data[start + i].toInt()).toByte()
+                val start = block * sliceSize
+                for (i in 0 until minOf(sliceSize, data.size - start)) chunk[i] = (chunk[i].toInt() xor data[start + i].toInt()).toByte()
             }
             payload.put(chunk)
             return Base64.getEncoder().encodeToString(payload.array())
@@ -83,7 +93,7 @@ class QrsDecoder : AutoCloseable {
         val indices = List(degree) { input.int }.toMutableSet()
         val blocks = input.int; val size = input.int; val crc = input.int
         val blockSize = input.remaining()
-        if (blocks !in 1..QrsLimits.MAX_BLOCKS || size !in 1..QrsLimits.MAX_DATA || blockSize !in 100..1500 ||
+        if (blocks !in 1..QrsLimits.MAX_BLOCKS || size !in 1..QrsLimits.MAX_DATA || blockSize !in QrsLimits.MIN_SLICE..QrsLimits.MAX_SLICE ||
             blocks != (size + blockSize - 1) / blockSize || indices.size != degree || indices.any { it !in 0 until blocks }) return null
         if (decoded.isEmpty()) {
             decoded = arrayOfNulls(blocks); byIndex = arrayOfNulls(blocks)

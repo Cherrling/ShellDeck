@@ -26,6 +26,31 @@ class QrsCodecTest {
             assertArrayEquals(original, QrsBackup.unframe(result!!))
         } }
     }
+    @Test fun changingBlockSizeRestartsEncodingAndRequiresANewReceiver() {
+        val original = Random(32).nextBytes(4013)
+        QrsEncoder(original.copyOf()).use { sender ->
+            QrsDecoder().use { old ->
+                old.accept(sender.next())
+                sender.resize(100)
+                assertThrows(IllegalArgumentException::class.java) { old.accept(sender.next()) }
+            }
+            for (size in listOf(100, 137, 500, 1499, 1500)) {
+                sender.resize(size)
+                QrsDecoder().use { receiver ->
+                    var restored: ByteArray? = null
+                    for (i in 0 until 300) {
+                        val frame = sender.next()
+                        if (i % 3 == 1) continue
+                        restored = receiver.accept(frame)
+                        if (restored != null) break
+                    }
+                    assertArrayEquals("slice=$size", original, restored)
+                }
+            }
+            assertThrows(IllegalArgumentException::class.java) { sender.resize(99) }
+            assertThrows(IllegalArgumentException::class.java) { sender.resize(1501) }
+        }
+    }
     @Test fun officialLittleEndianCompressedFrameDecodes() {
         val original = QrsBackup.frame("test data".repeat(40).toByteArray(), true)
         val deflater = Deflater(); deflater.setInput(original); deflater.finish()

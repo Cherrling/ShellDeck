@@ -36,6 +36,8 @@ import com.google.zxing.qrcode.QRCodeWriter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import kotlin.math.roundToInt
+import android.os.SystemClock
 
 @Composable
 fun QrsDialogs(controller: BackupController) {
@@ -71,16 +73,19 @@ fun QrsDialogs(controller: BackupController) {
 @Composable
 private fun QrsSend(sender: QrsExport, active: Boolean) {
     var paused by remember(sender) { mutableStateOf(false) }
-    var fps by remember(sender) { mutableIntStateOf(10) }
+    var parameters by remember(sender) { mutableStateOf(false) }
+    val fps = sender.fps
+    val sliceSize = sender.sliceSize
     var bitmap by remember(sender) { mutableStateOf<Bitmap?>(null) }
     var error by remember(sender) { mutableStateOf(false) }
-    LaunchedEffect(sender, active, paused, fps) {
-        if (!active || paused) return@LaunchedEffect
+    LaunchedEffect(sender, active, paused, fps, sliceSize, parameters) {
+        if (!active || paused || parameters) return@LaunchedEffect
         while (true) {
+            val started = SystemClock.elapsedRealtime()
             try { bitmap = withContext(Dispatchers.Default) { qrBitmap(sender.next()) } }
             catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
             catch (_: Exception) { error = true; break }
-            delay(1000L / fps)
+            delay((1000L / fps - (SystemClock.elapsedRealtime() - started)).coerceAtLeast(1L))
         }
     }
     TransferPanels(primary = {
@@ -94,10 +99,34 @@ private fun QrsSend(sender: QrsExport, active: Boolean) {
         Text("在另一台设备打开 ShellDeck → 备份与恢复 → 扫描二维码恢复。接收端提示收齐后即可关闭此页面。", style = MaterialTheme.typography.bodySmall)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             OutlinedButton(onClick = { paused = !paused }) { Text(if (paused) "继续" else "暂停") }
-            listOf(5, 10, 15).forEach { speed -> FilterChip(fps == speed, { fps = speed }, label = { Text("$speed 帧/秒") }) }
+            OutlinedButton(onClick = { parameters = true }) { Text("参数：$fps Hz · $sliceSize 字节") }
         }
         Text(if (sender.size > 256 * 1024) "备份较大，扫码可能需要几分钟。文件备份更适合大量数据。" else "扫描不稳定时降低速度，并调整屏幕距离和亮度。", style = MaterialTheme.typography.bodySmall)
     })
+    if (parameters) QrsParameters(sender, onDismiss = { parameters = false }, apply = { speed, bytes ->
+        if (bytes != sender.sliceSize) bitmap = null
+        sender.configure(speed, bytes)
+        error = false; parameters = false
+    })
+}
+
+@Composable
+private fun QrsParameters(sender: QrsExport, onDismiss: () -> Unit, apply: (Int, Int) -> Unit) {
+    var fps by remember(sender) { mutableIntStateOf(sender.fps) }
+    var bytes by remember(sender) { mutableIntStateOf(sender.sliceSize) }
+    AlertDialog(onDismissRequest = onDismiss, properties = DialogProperties(securePolicy = SecureFlagPolicy.SecureOn),
+        title = { Text("二维码传输参数") },
+        text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("帧率：$fps Hz")
+            Slider(value = fps.toFloat(), onValueChange = { fps = it.roundToInt() }, valueRange = 1f..60f, modifier = Modifier.testTag("qrs-fps"))
+            Text("1–60 Hz · 越低越容易稳定扫描", style = MaterialTheme.typography.bodySmall)
+            Text("分块大小：$bytes 字节")
+            Slider(value = bytes.toFloat(), onValueChange = { bytes = it.roundToInt() }, valueRange = 100f..1500f, modifier = Modifier.testTag("qrs-slice"))
+            Text("100–1500 字节 · 越大二维码越密集", style = MaterialTheme.typography.bodySmall)
+            if (bytes != sender.sliceSize) Text("修改分块大小后，请在接收端点击“重新开始接收”。", color = MaterialTheme.colorScheme.error)
+        } },
+        confirmButton = { TextButton(onClick = { apply(fps, bytes) }) { Text("应用") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } })
 }
 
 internal fun qrBitmap(content: String): Bitmap {
