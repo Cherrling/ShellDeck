@@ -73,18 +73,18 @@ fun QrsDialogs(controller: BackupController) {
 @Composable
 private fun QrsSend(sender: QrsExport, active: Boolean) {
     var paused by remember(sender) { mutableStateOf(false) }
-    var parameters by remember(sender) { mutableStateOf(false) }
     val fps = sender.fps
     val sliceSize = sender.sliceSize
     var bitmap by remember(sender) { mutableStateOf<Bitmap?>(null) }
     var error by remember(sender) { mutableStateOf(false) }
-    LaunchedEffect(sender, active, paused, fps, sliceSize, parameters) {
-        if (!active || paused || parameters) return@LaunchedEffect
+    LaunchedEffect(sender, active, paused, fps, sliceSize) {
+        if (!active || (paused && bitmap != null)) return@LaunchedEffect
         while (true) {
             val started = SystemClock.elapsedRealtime()
             try { bitmap = withContext(Dispatchers.Default) { qrBitmap(sender.next()) } }
             catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
             catch (_: Exception) { error = true; break }
+            if (paused) break
             delay((1000L / fps - (SystemClock.elapsedRealtime() - started)).coerceAtLeast(1L))
         }
     }
@@ -94,40 +94,25 @@ private fun QrsSend(sender: QrsExport, active: Boolean) {
             if (error) Text("无法继续生成二维码，请关闭后重试。", color = Color.Black)
         }
     }, controls = {
-        Text(if (sender.encrypted) "密码加密 · ${(sender.size + 1023) / 1024} KiB" else "不加密 · ${(sender.size + 1023) / 1024} KiB · 请仅向可信设备展示",
-            color = if (sender.encrypted) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error)
-        Text("在另一台设备打开 ShellDeck → 备份与恢复 → 扫描二维码恢复。接收端提示收齐后即可关闭此页面。", style = MaterialTheme.typography.bodySmall)
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(if (sender.encrypted) "密码加密 · ${(sender.size + 1023) / 1024} KiB" else "不加密 · ${(sender.size + 1023) / 1024} KiB",
+                Modifier.weight(1f), color = if (sender.encrypted) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error)
             OutlinedButton(onClick = { paused = !paused }) { Text(if (paused) "继续" else "暂停") }
-            OutlinedButton(onClick = { parameters = true }) { Text("参数：$fps Hz · $sliceSize 字节") }
         }
-        Text(if (sender.size > 256 * 1024) "备份较大，扫码可能需要几分钟。文件备份更适合大量数据。" else "扫描不稳定时降低速度，并调整屏幕距离和亮度。", style = MaterialTheme.typography.bodySmall)
-    })
-    if (parameters) QrsParameters(sender, onDismiss = { parameters = false }, apply = { speed, bytes ->
-        if (bytes != sender.sliceSize) bitmap = null
-        sender.configure(speed, bytes)
-        error = false; parameters = false
+        Text("帧率：$fps Hz")
+        Slider(value = fps.toFloat(), onValueChange = { sender.configure(it.roundToInt(), sender.sliceSize) },
+            valueRange = 1f..60f, modifier = Modifier.testTag("qrs-fps"))
+        Text("分块大小：$sliceSize 字节")
+        Slider(value = sliceSize.toFloat(), onValueChange = {
+            val bytes = it.roundToInt()
+            if (bytes != sender.sliceSize) { bitmap = null; sender.configure(sender.fps, bytes); error = false }
+        }, valueRange = 100f..1500f, modifier = Modifier.testTag("qrs-slice"))
+        Text("拖动即生效。分块改变后，接收进度自动重新开始。", style = MaterialTheme.typography.bodySmall)
+        if (!sender.encrypted) Text("请仅向可信设备展示。", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+        if (sender.size > 256 * 1024) Text("备份较大，扫码可能需要几分钟。", style = MaterialTheme.typography.bodySmall)
     })
 }
 
-@Composable
-private fun QrsParameters(sender: QrsExport, onDismiss: () -> Unit, apply: (Int, Int) -> Unit) {
-    var fps by remember(sender) { mutableIntStateOf(sender.fps) }
-    var bytes by remember(sender) { mutableIntStateOf(sender.sliceSize) }
-    AlertDialog(onDismissRequest = onDismiss, properties = DialogProperties(securePolicy = SecureFlagPolicy.SecureOn),
-        title = { Text("二维码传输参数") },
-        text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("帧率：$fps Hz")
-            Slider(value = fps.toFloat(), onValueChange = { fps = it.roundToInt() }, valueRange = 1f..60f, modifier = Modifier.testTag("qrs-fps"))
-            Text("1–60 Hz · 越低越容易稳定扫描", style = MaterialTheme.typography.bodySmall)
-            Text("分块大小：$bytes 字节")
-            Slider(value = bytes.toFloat(), onValueChange = { bytes = it.roundToInt() }, valueRange = 100f..1500f, modifier = Modifier.testTag("qrs-slice"))
-            Text("100–1500 字节 · 越大二维码越密集", style = MaterialTheme.typography.bodySmall)
-            if (bytes != sender.sliceSize) Text("修改分块大小后，请在接收端点击“重新开始接收”。", color = MaterialTheme.colorScheme.error)
-        } },
-        confirmButton = { TextButton(onClick = { apply(fps, bytes) }) { Text("应用") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } })
-}
 
 internal fun qrBitmap(content: String): Bitmap {
     val matrix = QRCodeWriter().encode(content, BarcodeFormat.QR_CODE, 512, 512, mapOf(EncodeHintType.MARGIN to 4))
@@ -165,6 +150,7 @@ private fun QrsReceive(receiver: QrsReceiver, active: Boolean, controller: Backu
 @Composable
 private fun TransferPanels(primary: @Composable () -> Unit, controls: @Composable () -> Unit) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
+        val maxControlsHeight = maxHeight * 0.55f
         if (maxWidth > maxHeight) {
             Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 Box(Modifier.weight(1f).fillMaxHeight()) { primary() }
@@ -173,7 +159,7 @@ private fun TransferPanels(primary: @Composable () -> Unit, controls: @Composabl
         } else {
             Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Box(Modifier.weight(1f).fillMaxWidth()) { primary() }
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { controls() }
+                Column(Modifier.heightIn(max = maxControlsHeight).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) { controls() }
             }
         }
     }

@@ -28,6 +28,7 @@ class QrsReceiver : AutoCloseable {
         if (closed) return null
         return try {
             val data = decoder.accept(text)
+            error = null
             if (data == null) {
                 val next = decoder.count to decoder.total
                 if (progress != next) progress = next

@@ -26,26 +26,24 @@ class QrsCodecTest {
             assertArrayEquals(original, QrsBackup.unframe(result!!))
         } }
     }
-    @Test fun changingBlockSizeRestartsEncodingAndRequiresANewReceiver() {
+    @Test fun changingBlockSizeResetsTheSameReceiverWithoutMixingEquations() {
         val original = Random(32).nextBytes(4013)
         QrsEncoder(original.copyOf()).use { sender ->
-            QrsDecoder().use { old ->
-                old.accept(sender.next())
-                sender.resize(100)
-                assertThrows(IllegalArgumentException::class.java) { old.accept(sender.next()) }
-            }
-            for (size in listOf(100, 137, 500, 1499, 1500)) {
-                sender.resize(size)
-                QrsDecoder().use { receiver ->
-                    var restored: ByteArray? = null
-                    for (i in 0 until 300) {
-                        val frame = sender.next()
-                        if (i % 3 == 1) continue
-                        restored = receiver.accept(frame)
-                        if (restored != null) break
-                    }
-                    assertArrayEquals("slice=$size", original, restored)
+            QrsDecoder().use { receiver ->
+                for (size in listOf(100, 137, 1500, 1499, 500, 100)) {
+                    sender.resize(size)
+                    receiver.accept(sender.next())
+                    assertEquals(1, receiver.count)
+                    assertEquals((original.size + size - 1) / size, receiver.total)
                 }
+                var restored: ByteArray? = null
+                for (i in 0 until 300) {
+                    val frame = sender.next()
+                    if (i % 3 == 1) continue
+                    restored = receiver.accept(frame)
+                    if (restored != null) break
+                }
+                assertArrayEquals(original, restored)
             }
             assertThrows(IllegalArgumentException::class.java) { sender.resize(99) }
             assertThrows(IllegalArgumentException::class.java) { sender.resize(1501) }
@@ -66,6 +64,8 @@ class QrsCodecTest {
             assertNull(receiver.accept(Base64.getEncoder().encodeToString(invalid))); assertEquals(0, receiver.total)
             QrsEncoder(ByteArray(2000) { 1 }).use { a -> QrsEncoder(ByteArray(2000) { 2 }).use { b ->
                 receiver.accept(a.next()); assertEquals(1, receiver.count)
+                assertThrows(IllegalArgumentException::class.java) { receiver.accept(b.next()) }
+                b.resize(137)
                 assertThrows(IllegalArgumentException::class.java) { receiver.accept(b.next()) }
                 assertEquals(1, receiver.count)
             } }

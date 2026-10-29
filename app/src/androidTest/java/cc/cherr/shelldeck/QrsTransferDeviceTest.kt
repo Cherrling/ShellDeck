@@ -138,16 +138,16 @@ class QrsTransferDeviceTest {
             val sender = model.backup.qrsExport!!
             assertFalse(sender.encrypted)
             ui.onNodeWithTag("qrs-display").assertIsDisplayed()
-            ui.onNodeWithText("参数：10 Hz · 500 字节").performClick()
-            ui.onNodeWithTag("qrs-fps").performSemanticsAction(SemanticsActions.SetProgress) { it(37f) }
-            ui.onNodeWithTag("qrs-slice").performSemanticsAction(SemanticsActions.SetProgress) { it(137f) }
+            ui.onNodeWithTag("qrs-fps").performScrollTo().performSemanticsAction(SemanticsActions.SetProgress) { it(37f) }
+            ui.onNodeWithTag("qrs-slice").performScrollTo().performSemanticsAction(SemanticsActions.SetProgress) { it(137f) }
             ui.onNodeWithText("帧率：37 Hz").assertIsDisplayed()
             ui.onNodeWithText("分块大小：137 字节").assertIsDisplayed()
-            ui.onNodeWithText("应用").performClick()
+            ui.onNodeWithText("应用").assertDoesNotExist()
             assertEquals(37, sender.fps); assertEquals(137, sender.sliceSize)
             ui.activityRule.scenario.recreate()
             assertSame(sender, model.backup.qrsExport)
-            ui.onNodeWithText("参数：37 Hz · 137 字节").assertIsDisplayed()
+            ui.onNodeWithText("帧率：37 Hz").performScrollTo().assertIsDisplayed()
+            ui.onNodeWithText("分块大小：137 字节").performScrollTo().assertIsDisplayed()
             ui.onNodeWithContentDescription("关闭二维码传输").performClick()
             assertThrows(IllegalStateException::class.java) { sender.next() }
             ui.runOnUiThread { model.backup.backupQr() }

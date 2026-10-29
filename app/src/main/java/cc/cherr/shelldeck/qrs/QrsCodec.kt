@@ -95,6 +95,9 @@ class QrsDecoder : AutoCloseable {
         val blockSize = input.remaining()
         if (blocks !in 1..QrsLimits.MAX_BLOCKS || size !in 1..QrsLimits.MAX_DATA || blockSize !in QrsLimits.MIN_SLICE..QrsLimits.MAX_SLICE ||
             blocks != (size + blockSize - 1) / blockSize || indices.size != degree || indices.any { it !in 0 until blocks }) return null
+        // A resized raw transfer retains its original length and CRC32 (before xor with k).
+        // Drop all old equations together; never mix different block widths or switch to another file.
+        if (decoded.isNotEmpty() && blockSize != slice && size == length && (crc xor blocks) == (checksum xor total)) clearBlocks()
         if (decoded.isEmpty()) {
             decoded = arrayOfNulls(blocks); byIndex = arrayOfNulls(blocks)
             length = size; slice = blockSize; checksum = crc
@@ -157,9 +160,9 @@ class QrsDecoder : AutoCloseable {
             return output.toByteArray()
         } finally { inflater.end(); buffer.fill(0); output.close() }
     }
-    @Synchronized override fun close() {
-        closed = true
+    private fun clearBlocks() {
         decoded.forEach { it?.fill(0) }; pending.forEach { it.bytes.fill(0) }
-        decoded = emptyArray(); byIndex = emptyArray(); pending.clear(); references = 0
+        decoded = emptyArray(); byIndex = emptyArray(); pending.clear(); references = 0; count = 0
     }
+    @Synchronized override fun close() { closed = true; clearBlocks() }
 }
